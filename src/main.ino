@@ -45,9 +45,9 @@ const int MIN_LOG_LEVEL = 6;
 #include <sys/time.h>
 
 #define BM_ADDRESS 1 // battery monitor device address
-static char BM_RBASE_CMD[] = "R00"; // battery monitor read state command
-static char BM_RMSG_CMD[] = "R50"; // battery monitor read measures command
-static char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
+const char BM_RBASE_CMD[] = "R00"; // battery monitor read state command
+const char BM_RMSG_CMD[] = "R50"; // battery monitor read measures command
+const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
 #define BM_MAX_MSG_NO 27 // battery monitor max no. of message fields, incl. checksum
 #define BM_MAX_MSG_SIZE 125 // battery monitor max message size (current max R51 message size is 113 chars)
 
