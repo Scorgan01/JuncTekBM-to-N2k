@@ -35,8 +35,8 @@ const int MIN_LOG_LEVEL = 6;
 
 #include <Arduino.h>
 // #include <M5stack.h>
-#include <N2kMessages.h>
 #include <NMEA2000_CAN.h> // This will automatically choose right CAN library and create suitable NMEA2000 object
+#include <N2kMessages.h>
 #include <Preferences.h>
 #include <WiFi.h>
 #include <string.h>
