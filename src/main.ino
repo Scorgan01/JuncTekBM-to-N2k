@@ -30,8 +30,9 @@ const int MIN_LOG_LEVEL = 6;
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
 #define ESP32_CAN_RX_PIN GPIO_NUM_19 // set CAN RX port to 19
-#define RS485_RX_PIN GPIO_NUM_32 // define the RS485 RX port
-#define RS485_TX_PIN GPIO_NUM_26 // define the RS485 TX port
+#define RS485_RX_PIN GPIO_NUM_32     // define the RS485 RX port
+#define RS485_TX_PIN GPIO_NUM_26     // define the RS485 TX port
+#define USE_N2K_CAN 7                // #define for NMEA2000_CAN library for use with ESP32
 
 #include <Arduino.h>
 // #include <M5stack.h>

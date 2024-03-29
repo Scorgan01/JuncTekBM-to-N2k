@@ -4,4 +4,4 @@ Designed for M5Stack Atom Lite ESP32 processor and RS485 Tail + CAN modules.
 
 Creates NMEA 2000 PNGs
 - 127506 (DC detailed status)
-- 127508 (battery status)
+- 127508 (Battery status)
