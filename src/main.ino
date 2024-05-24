@@ -1,29 +1,30 @@
-/*
-  This code is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
-  This code is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
-  You should have received a copy of the GNU Lesser General Public
-  License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+/* This code is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 2.1 of the License, or (at your option) any later version.
+   This code is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
+   You should have received a copy of the GNU Lesser General Public
+   License along with this library; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-// Reads battery RS485 messages from Junctek KH1x0F Battery Monitor and forwards them to N2k bus
-// Creates N2k messages: 127508 - battery status, 127506 - DC detailed status, (126996 - product info)
-// Version 0.9, 30/03/2024, Scorgan - Ulrich Meine
+/* Reads battery RS485 messages from Junctek KH1x0F battery monitor and forwards them to N2k bus
+   Creates N2k messages: 127508 - battery status, 127506 - DC detailed status, (126996 - product info)
+   Version 0.9, 30/03/2024, Scorgan - Ulrich Meine
 
-// Battery monitor message reading and parsing takes ideas from: PlJakobs https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main
-// Uses the great work of Timo Lappalainen and his NMEA 2000 libraries: https://github.com/ttlappalainen
-// All N2k handling uses code by AK-Homberger: https://github.com/AK-Homberger
-// Webserver logging by OER Informatik: https://gitlab.com/oer-informatik/mcu/arduino-esp/-/blob/main/src/loggingWLANWebpage/loggingWLANWebpage.ino
+   Battery monitor message reading and parsing takes ideas from: PlJakobs https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main
+   Uses the great work of Timo Lappalainen and his NMEA 2000 libraries: https://github.com/ttlappalainen
+   All N2k handling uses code by AK-Homberger: https://github.com/AK-Homberger
+   Webserver logging by OER Informatik: https://gitlab.com/oer-informatik/mcu/arduino-esp/-/blob/main/src/loggingWLANWebpage/loggingWLANWebpage.ino
+   OTAWebUpdater.ino Example from ArduinoOTA Library: * Rui Santos http://randomnerdtutorials.com
+*/
 
 #define DEBUG // Flag to activate logging to serial console (i.e. serial monitor in arduino ide)
 // #define TEST // provide test data sentence if no device connected
-#define WEBLOG // configure logging via web server
+// #define WEBLOG // configure logging via web server
 
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
@@ -37,10 +38,17 @@
 #include <N2kMessages.h>
 #include <NMEA2000_CAN.h> // This will automatically choose right CAN library and create suitable NMEA2000 object
 #include <Preferences.h>
-#include <WiFi.h>
 #include <string.h>
-#include <string>
 // #include <sys/time.h>
+#include <ESPmDNS.h>
+#include <Update.h>
+#include <WebServer.h>
+#include <WiFi.h>
+#include <WiFiAP.h>
+#include <WiFiClient.h>
+#include <WiFiMulti.h>
+
+#include "secrets.h" // Passwords saved in this file to be hidden from version control and sharing
 
 #define BM_ADDRESS 1 // battery monitor device address
 #define BM_MAX_MSG_NO 27 // battery monitor max no. of message fields, incl. checksum
@@ -91,7 +99,8 @@ typedef struct {
         batteryType;
 } batteryData_t;
 
-batteryData_t batteryData; // current battery data
+// battery data store and static battery data initialization -> adjust
+batteryData_t batteryData = { .stateOfHealth = 100, .instance = 0x02, .batteryType = N2kDCt_Battery };
 String BMDataSentence; // raw string of BM measured values
 
 int NodeAddress; // To store last N2k device node address
@@ -104,16 +113,20 @@ bool IsTimeToUpdate(unsigned long NextUpdate);
 unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 
-#ifdef WEBLOG
-#include "secrets.h" // Passwords saved in this file to be hidden from version control and sharing
-#include <WiFiMulti.h>
-
-// WiFi-Settings (if not defined in secrets.h replace your SSID/PW here)
+// Wifi settings for OTA update (if not defined in secrets.h replace your SSID/PW here)
+const char* WIFI_HOST = "batteryesp32";
 const char* WIFI_SSID = SECRET_WIFI_SSID; // Wifi network name (SSID)
 const char* WIFI_PASSWORD = SECRET_WIFI_PASSWORD; // Wifi network password
+const IPAddress ApIpAddress(192, 168, 21, 1); // Wifi access point server ip address
+const IPAddress ApGateway(192, 168, 21, 1); // Wifi access point server gateway
+const IPAddress ApSubnet(255, 255, 255, 0); // Wifi access point server subnet
+const int WEBSERVER_PORT = 80;
+const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
 const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
-const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after __ times connection errors
+const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
 WiFiMulti wifiMulti;
+String loginIndex;
+String updateIndex;
 
 //-------------------------------------------------------------------------------------
 // Configuration of the NTP-Server
@@ -124,22 +137,20 @@ const char* NTP_SERVER = "pool.ntp.org";
 const long GMT_OFFSET_SEC = 3600;
 const int DAYLIGHT_OFFSET_SEC = 3600;
 
-// Set Route and Port for the Logpage-Webserver
-#include <WebServer.h>
-const int WEBSERVER_PORT = 8080;
-const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
-
+// Set Route and Port for the OTA webserver
 WebServer server(WEBSERVER_PORT);
-#endif
 
-//
-// -------------------------------------   setup   -----------------------------------------
-//
+//-------------------------------------------------------------------------------------
+//   setup
+//-------------------------------------------------------------------------------------
 void setup()
 {
     uint8_t chipid[6];
     uint32_t id = 0;
     int i = 0;
+
+    loginIndex = OTA_LoginPage();
+    updateIndex = OTA_updatePage();
 
 #ifdef DEBUG
     Serial.begin(115200); // Activate debugging via serial monitor
@@ -148,25 +159,16 @@ void setup()
 
     debugOutput("Starting Programm...", 6, true);
 
-//  Disable WiFi and bluetooth since we don't need it
-#ifndef WEBLOG
-    WiFi.mode(WIFI_OFF);
-#endif
+    //  Disable bluetooth since we don't need it
     btStop();
 
-/*  // Reduce CPU frequency to save power
-    debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-    setCpuFrequencyMhz(80);
-    debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-*/
+    /*  // Reduce CPU frequency to save power
+        debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+        setCpuFrequencyMhz(80);
+        debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+    */
     SerRS485.begin(115200, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN); // Initialize RS485 communication
     delay(100);
-
-    // battery static data -> adjust
-    batteryData.instance = 0x02; // battery instance no. for service battery
-    batteryData.batteryType = N2kDCt_Battery; // type of service battery
-    //    batteryData.totalCapacity = 2.2; // capacity of service battery at Ah
-    batteryData.stateOfHealth = 100; // static definition for SoH as 100%
 
     if (BMGetBatterySettings(BM_ADDRESS)) {
         debugOutput("Total battery capacity: " + String(batteryData.totalCapacity) + " kWh", 4, true);
@@ -237,11 +239,80 @@ void setup()
     server.begin();
     debugOutput("Finished startup.", 6, true);
 #endif
+
+
+    // Connect to Wi-Fi network with SSID and password
+    debugOutput("Setting WiFi access point ...", 6, true);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(ApIpAddress, ApGateway, ApSubnet);
+    if(WiFi.softAP(WIFI_SSID, WIFI_PASSWORD)) {
+        debugOutput("Established WiFi access point", 4, true);
+    } else {
+        debugOutput("Error setting up WiFi access point", 2, true);
+    }
+
+    debugOutput("Access point: " + String(WIFI_SSID), 4, true);
+    IPAddress IP = WiFi.softAPIP();
+    debugOutput("AP IP address: " + String(IP), 4, true);
+    Serial.println(IP);
+    
+    /*use mdns for host name resolution*/
+    if (!MDNS.begin(WIFI_HOST)) { // http://batteryesp32.local
+        debugOutput("Error setting up mDNS responder.", 2, true);
+        while (1) {
+            delay(1000);
+        }
+    }
+    debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
+
+    /*return index page which is stored in serverIndex */
+    server.on("/", HTTP_GET, []() {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/html", loginIndex);
+    });
+    server.on("/updateIndex", HTTP_GET, []() {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/html", updateIndex);
+    });
+
+    /*handling uploading firmware file */
+    server.on("/update", HTTP_POST, []() {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+            ESP.restart();
+    }, []() {
+        HTTPUpload& upload = server.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            debugOutput("Update: " + upload.filename, 4, true);
+            Serial.printf("Update: %s\n", upload.filename.c_str());
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            /* flashing firmware to ESP*/
+            debugOutput("Start flashing", 6, true);
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (Update.end(true)) { //true to set the size to the current progress
+                debugOutput("Update success./nRebooting ...", 4, true);
+                Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+            } else {
+                debugOutput("Error updating firmware.", 2, true);
+                Update.printError(Serial);
+            }
+        }
+    });
+    server.begin();
+
+    // if no WiFi update, disable WiFi after 2 minutes
+    //  WiFi.mode(WIFI_OFF);
 }
 
-//
-// -------------------------------------   Main loop   -----------------------------------------
-//
+//-------------------------------------------------------------------------------------
+//    Main loop
+//-------------------------------------------------------------------------------------
 void loop()
 {
     int SourceAddress;
@@ -250,11 +321,12 @@ void loop()
     //  ensureWIFIConnection();
     //  server.handleClient();
 #endif
-
     debugOutput("_____________ Next loop _____________\n\n", 5);
 
+    server.handleClient();
+
     if (BMGetBatteryState(BM_ADDRESS)) {
-        SendN2kBatteryState();
+            SendN2kBatteryState();
     } else {
         debugOutput("Error retreiving battery state", 2);
     }
@@ -350,10 +422,10 @@ String BMreadMsg()
     }
 
     // to be corrected "sizeof"
-    if (sizeof(receivedData) == 0) {
+    if (sizeof(receivedData) / sizeof(receivedData[0]) == 0) {
         debugOutput("No data received", 2);
     } else {
-        debugOutput("Dataset size:" + String(sizeof(receivedData)), 7);
+        debugOutput("Dataset size:" + String(sizeof(receivedData) / sizeof(receivedData[0])), 7);
         debugOutput("Data: " + receivedData, 7);
     }
 
@@ -576,6 +648,97 @@ void debugOutput(String text, int logLevel)
 void debugOutput(String text)
 {
     debugOutput(text, 4); // no loglevel present? use "INFO"
+}
+
+//-------------------------------------------------------------------------------------
+// Define OTA login page
+//-------------------------------------------------------------------------------------
+
+String OTA_LoginPage()
+{
+    String loginIndex = "<form name='loginForm'>"
+                        "<table width='20%' bgcolor='A09F9F' align='center'>"
+                        "<tr>"
+                        "<td colspan=2>"
+                        "<center><font size=4><b>ESP32 Login Page</b></font></center>"
+                        "<br>"
+                        "</td>"
+                        "<br>"
+                        "<br>"
+                        "</tr>"
+                        "<td>Username:</td>"
+                        "<td><input type='text' size=25 name='userid'><br></td>"
+                        "</tr>"
+                        "<br>"
+                        "<br>"
+                        "<tr>"
+                        "<td>Password:</td>"
+                        "<td><input type='Password' size=25 name='pwd'><br></td>"
+                        "<br>"
+                        "<br>"
+                        "</tr>"
+                        "<tr>"
+                        "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
+                        "</tr>"
+                        "</table>"
+                        "</form>"
+                        "<script>"
+                        "function check(form)"
+                        "{"
+                        "if(form.userid.value=='admin' && form.pwd.value=='admin')"
+                        "{"
+                        "window.open('/updateIndex')"
+                        "}"
+                        "else"
+                        "{"
+                        " alert('Error Password or Username')/*displays error message*/"
+                        "}"
+                        "}"
+                        "</script>";
+    return loginIndex;
+}
+
+//-------------------------------------------------------------------------------------
+// Update Page
+//-------------------------------------------------------------------------------------
+String OTA_updatePage()
+{
+    String updateIndex = "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+                         "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+                         "<input type='file' name='update'>"
+                         "<input type='submit' value='Update'>"
+                         "</form>"
+                         "<div id='prg'>progress: 0%</div>"
+                         "<script>"
+                         "$('form').submit(function(e){"
+                         "e.preventDefault();"
+                         "var form = $('#upload_form')[0];"
+                         "var data = new FormData(form);"
+                         " $.ajax({"
+                         "url: '/update',"
+                         "type: 'POST',"
+                         "data: data,"
+                         "contentType: false,"
+                         "processData:false,"
+                         "xhr: function() {"
+                         "var xhr = new window.XMLHttpRequest();"
+                         "xhr.upload.addEventListener('progress', function(evt) {"
+                         "if (evt.lengthComputable) {"
+                         "var per = evt.loaded / evt.total;"
+                         "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+                         "}"
+                         "}, false);"
+                         "return xhr;"
+                         "},"
+                         "success:function(d, s) {"
+                         "console.log('success!')"
+                         "},"
+                         "error: function (a, b, c) {"
+                         "}"
+                         "});"
+                         "});"
+                         "</script>";
+    return updateIndex;
 }
 
 // #ifdef WEBLOG
