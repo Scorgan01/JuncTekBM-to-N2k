@@ -48,7 +48,8 @@
 #include <WiFiClient.h>
 #include <WiFiMulti.h>
 
-#include "secrets.h" // Passwords saved in this file to be hidden from version control and sharing
+#include "debugoutput.h" // standardized debug messages to Serial
+#include "otaupdate.h"  // all parameter and functions for WiFi access point and OTA update
 
 #define BM_ADDRESS 1 // battery monitor device address
 #define BM_MAX_MSG_NO 27 // battery monitor max no. of message fields, incl. checksum
@@ -63,10 +64,11 @@ const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
 
 HardwareSerial SerRS485(2);
 
-const int MIN_LOG_LEVEL = 6;
+/*const int MIN_LOG_LEVEL = 6;
 String LOG_LEVEL_NAMES[] = { "OFF", "FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "ALL" };
 String setupLogText = "";
 String loopLogText = "";
+*/
 
 typedef struct {
     int
@@ -114,19 +116,22 @@ unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 
 // Wifi settings for OTA update (if not defined in secrets.h replace your SSID/PW here)
-const char* WIFI_HOST = "batteryesp32";
+/* const char* WIFI_HOST = "batteryesp32";
 const char* WIFI_SSID = SECRET_WIFI_SSID; // Wifi network name (SSID)
 const char* WIFI_PASSWORD = SECRET_WIFI_PASSWORD; // Wifi network password
 const IPAddress ApIpAddress(192, 168, 21, 1); // Wifi access point server ip address
 const IPAddress ApGateway(192, 168, 21, 1); // Wifi access point server gateway
 const IPAddress ApSubnet(255, 255, 255, 0); // Wifi access point server subnet
 const int WEBSERVER_PORT = 80;
+*/
+
+// Set webserver object and Port for the OTA webserver
+WebServer otaServer (WEBSERVER_PORT);
+
 const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
 const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
 const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
 WiFiMulti wifiMulti;
-String loginIndex;
-String updateIndex;
 
 //-------------------------------------------------------------------------------------
 // Configuration of the NTP-Server
@@ -137,9 +142,6 @@ const char* NTP_SERVER = "pool.ntp.org";
 const long GMT_OFFSET_SEC = 3600;
 const int DAYLIGHT_OFFSET_SEC = 3600;
 
-// Set Route and Port for the OTA webserver
-WebServer server(WEBSERVER_PORT);
-
 //-------------------------------------------------------------------------------------
 //   setup
 //-------------------------------------------------------------------------------------
@@ -149,8 +151,8 @@ void setup()
     uint32_t id = 0;
     int i = 0;
 
-    loginIndex = OTA_LoginPage();
-    updateIndex = OTA_updatePage();
+//    loginIndex = OTA_LoginPage();
+//    updateIndex = OTA_updatePage();
 
 #ifdef DEBUG
     Serial.begin(115200); // Activate debugging via serial monitor
@@ -189,7 +191,7 @@ void setup()
     NMEA2000.SetProductInformation("A9529AFB16", // Manufacturer's Model serial code; here, M5Stack Atom Lite
         6001, // Manufacturer's product code
         "BM Monitor", // Manufacturer's Model ID
-        "0.8.0.0", // Manufacturer's Software version code
+        "1.0.0.0", // Manufacturer's Software version code
         "1.0.0.0", // Manufacturer's Model version
         N2K_LOAD_LEVEL, // Device power load on N2k bus
         0xffff, 0x01);
@@ -221,90 +223,42 @@ void setup()
     };
     delay(200);
 
-#ifdef WEBLOG
-    debugOutput("WiFi will be established", 6, true);
-    WiFi.mode(WIFI_STA); // Connectmode Station: as client on accesspoint
-    wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD); // multpile networks possible
-    debugOutput("Connecting to a WiFi Accesspoint", 5, true);
-    ensureWIFIConnection(); // Call connection-function for the first
-
-    // Init and get the time
-    debugOutput("Connection to NTP-Timeserver", 6, true);
-    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
-
-    debugOutput("Starting Webserver...", 6, true);
-    server.on(WEBSERVER_ROUTE_TO_DEBUG_OUTPUT, respondRequestWithLogEntries);
-    String log_address = "http://" + WiFi.localIP().toString() + ":" + String(WEBSERVER_PORT) + WEBSERVER_ROUTE_TO_DEBUG_OUTPUT;
-    debugOutput("Logging will be published on: " + log_address, 5, true);
-    server.begin();
-    debugOutput("Finished startup.", 6, true);
-#endif
-
-
     // Connect to Wi-Fi network with SSID and password
+//    debugOutput("Setting WiFi access point ...", 6, true);
+//    WiFi.mode(WIFI_AP);
+//    WiFi.softAPConfig(ApIpAddress, ApGateway, ApSubnet);
+//    if(WiFi.softAP(WIFI_SSID, WIFI_PASSWORD)) {
+
+    // Setup WiFi access point with SSID and password
     debugOutput("Setting WiFi access point ...", 6, true);
-    WiFi.mode(WIFI_AP);
-    WiFi.softAPConfig(ApIpAddress, ApGateway, ApSubnet);
-    if(WiFi.softAP(WIFI_SSID, WIFI_PASSWORD)) {
-        debugOutput("Established WiFi access point", 4, true);
-    } else {
-        debugOutput("Error setting up WiFi access point", 2, true);
+    switch (otaStartWifi()) {
+        case 0:
+            debugOutput("Established WiFi access point", 4, true);
+            debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
+            break;
+        case 1:
+            debugOutput("Error setting up WiFi access point", 2, true);
+            break;
+        case 2:
+            debugOutput("Error setting up mDNS responder.", 2, true);
     }
 
-    debugOutput("Access point: " + String(WIFI_SSID), 4, true);
-    IPAddress IP = WiFi.softAPIP();
-    debugOutput("AP IP address: " + String(IP), 4, true);
-    Serial.println(IP);
+//    debugOutput("Access point: " + String(WIFI_SSID), 4, true);
+//    IPAddress IP = WiFi.softAPIP();
+//    debugOutput("AP IP address: " + String(IP), 4, true);
+//   Serial.println(IP);
     
-    /*use mdns for host name resolution*/
-    if (!MDNS.begin(WIFI_HOST)) { // http://batteryesp32.local
-        debugOutput("Error setting up mDNS responder.", 2, true);
-        while (1) {
-            delay(1000);
-        }
+//    }
+
+    switch (otaDefineOTAWebServer(&otaServer)) {
+        case 0:
+            debugOutput("Update success./nRebooting ...", 4, true);
+            break;
+        case 1:
+            debugOutput("Error updating firmware.", 2, true);
     }
-    debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
 
-    /*return index page which is stored in serverIndex */
-    server.on("/", HTTP_GET, []() {
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/html", loginIndex);
-    });
-    server.on("/updateIndex", HTTP_GET, []() {
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/html", updateIndex);
-    });
-
-    /*handling uploading firmware file */
-    server.on("/update", HTTP_POST, []() {
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
-            ESP.restart();
-    }, []() {
-        HTTPUpload& upload = server.upload();
-        if (upload.status == UPLOAD_FILE_START) {
-            debugOutput("Update: " + upload.filename, 4, true);
-            Serial.printf("Update: %s\n", upload.filename.c_str());
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_WRITE) {
-            /* flashing firmware to ESP*/
-            debugOutput("Start flashing", 6, true);
-            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_END) {
-            if (Update.end(true)) { //true to set the size to the current progress
-                debugOutput("Update success./nRebooting ...", 4, true);
-                Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-            } else {
-                debugOutput("Error updating firmware.", 2, true);
-                Update.printError(Serial);
-            }
-        }
-    });
-    server.begin();
+    otaServer.begin();
 
     // if no WiFi update, disable WiFi after 2 minutes
     //  WiFi.mode(WIFI_OFF);
@@ -323,7 +277,7 @@ void loop()
 #endif
     debugOutput("_____________ Next loop _____________\n\n", 5);
 
-    server.handleClient();
+    otaServer.handleClient();
 
     if (BMGetBatteryState(BM_ADDRESS)) {
             SendN2kBatteryState();
@@ -350,7 +304,7 @@ bool BMGetBatteryState(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
+    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data when no device needs is connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
@@ -611,137 +565,7 @@ void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period)
         NextUpdate += Period;
 }
 
-//-------------------------------------------------------------------------------------
-//
-// Webserver logging routines
-//
-//-------------------------------------------------------------------------------------
-void debugOutput(String text, int logLevel, bool setupLog)
-{
-    if (MIN_LOG_LEVEL >= logLevel) {
-        String timeAsString = "";
-        /*    struct tm timeinfo;
-            if (!getLocalTime(&timeinfo)) {
-              timeAsString = "[no NTP]";
-            } else {
-              char timeAsChar[20];
-              strftime(timeAsChar, 20, "%Y-%m-%d_%H:%M:%S", &timeinfo);
-              timeAsString = String(timeAsChar);
-            } */
-        if (setupLog) {
-            setupLogText = setupLogText + "[" + timeAsString + "] " + " [" + LOG_LEVEL_NAMES[logLevel] + "] " + text + "<br/>\n";
-        } else {
-            loopLogText = loopLogText + "[" + timeAsString + "] " + " [" + LOG_LEVEL_NAMES[logLevel] + "] " + text + "<br/>\n";
-        }
-//    DEBUG_PRINTLN("[" + timeAsString + "] [" + LOG_LEVEL_NAMES[logLevel] + "] " + text);
-#ifdef DEBUG
-        Serial.println("[" + timeAsString + "] [" + LOG_LEVEL_NAMES[logLevel] + "] " + text);
-#endif
-    }
-}
-
-void debugOutput(String text, int logLevel)
-{
-    debugOutput(text, logLevel, false); // log to loopLogText is default
-}
-
-void debugOutput(String text)
-{
-    debugOutput(text, 4); // no loglevel present? use "INFO"
-}
-
-//-------------------------------------------------------------------------------------
-// Define OTA login page
-//-------------------------------------------------------------------------------------
-
-String OTA_LoginPage()
-{
-    String loginIndex = "<form name='loginForm'>"
-                        "<table width='20%' bgcolor='A09F9F' align='center'>"
-                        "<tr>"
-                        "<td colspan=2>"
-                        "<center><font size=4><b>ESP32 Login Page</b></font></center>"
-                        "<br>"
-                        "</td>"
-                        "<br>"
-                        "<br>"
-                        "</tr>"
-                        "<td>Username:</td>"
-                        "<td><input type='text' size=25 name='userid'><br></td>"
-                        "</tr>"
-                        "<br>"
-                        "<br>"
-                        "<tr>"
-                        "<td>Password:</td>"
-                        "<td><input type='Password' size=25 name='pwd'><br></td>"
-                        "<br>"
-                        "<br>"
-                        "</tr>"
-                        "<tr>"
-                        "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
-                        "</tr>"
-                        "</table>"
-                        "</form>"
-                        "<script>"
-                        "function check(form)"
-                        "{"
-                        "if(form.userid.value=='admin' && form.pwd.value=='admin')"
-                        "{"
-                        "window.open('/updateIndex')"
-                        "}"
-                        "else"
-                        "{"
-                        " alert('Error Password or Username')/*displays error message*/"
-                        "}"
-                        "}"
-                        "</script>";
-    return loginIndex;
-}
-
-//-------------------------------------------------------------------------------------
-// Update Page
-//-------------------------------------------------------------------------------------
-String OTA_updatePage()
-{
-    String updateIndex = "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
-                         "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
-                         "<input type='file' name='update'>"
-                         "<input type='submit' value='Update'>"
-                         "</form>"
-                         "<div id='prg'>progress: 0%</div>"
-                         "<script>"
-                         "$('form').submit(function(e){"
-                         "e.preventDefault();"
-                         "var form = $('#upload_form')[0];"
-                         "var data = new FormData(form);"
-                         " $.ajax({"
-                         "url: '/update',"
-                         "type: 'POST',"
-                         "data: data,"
-                         "contentType: false,"
-                         "processData:false,"
-                         "xhr: function() {"
-                         "var xhr = new window.XMLHttpRequest();"
-                         "xhr.upload.addEventListener('progress', function(evt) {"
-                         "if (evt.lengthComputable) {"
-                         "var per = evt.loaded / evt.total;"
-                         "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
-                         "}"
-                         "}, false);"
-                         "return xhr;"
-                         "},"
-                         "success:function(d, s) {"
-                         "console.log('success!')"
-                         "},"
-                         "error: function (a, b, c) {"
-                         "}"
-                         "});"
-                         "});"
-                         "</script>";
-    return updateIndex;
-}
-
-// #ifdef WEBLOG
+#ifdef WEBLOG
 void ensureWIFIConnection()
 {
     if (WiFi.status() != WL_CONNECTED) {
@@ -784,4 +608,4 @@ void respondRequestWithLogEntries()
     body = body + loopLogText;
     server.send(200, "text/html; charset=utf-8", renderHtml(header, body));
 }
-// #endif
+#endif
