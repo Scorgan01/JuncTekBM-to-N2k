@@ -29,7 +29,7 @@ static const int WEBSERVER_PORT = 80;
 
 //private:
     // Define OTA login page
-    void otaDefineOTAWebPages(String pg_login, String pg_update);
+    void otaDefineOTAWebPages(String &pg_login, String &pg_update);
 //};
 
 #endif

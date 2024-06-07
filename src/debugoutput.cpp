@@ -8,9 +8,9 @@ void debugOutput(String text, int logLevel, bool setupLog)
     String codeSegment;
 
     if (setupLog) {
-        codeSegment = "<setup> section";
+        codeSegment = "setup";
     } else {
-        codeSegment = "<loop> section";
+        codeSegment = "loop";
     }
 
     if (MIN_LOG_LEVEL >= logLevel) {

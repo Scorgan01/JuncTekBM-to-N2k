@@ -20,11 +20,11 @@
    All N2k handling uses code by AK-Homberger: https://github.com/AK-Homberger
    Webserver logging by OER Informatik: https://gitlab.com/oer-informatik/mcu/arduino-esp/-/blob/main/src/loggingWLANWebpage/loggingWLANWebpage.ino
    OTAWebUpdater.ino Example from ArduinoOTA Library: * Rui Santos http://randomnerdtutorials.com
+   Design OTA web page: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/
 */
 
 #define DEBUG // Flag to activate logging to serial console (i.e. serial monitor in arduino ide)
 // #define TEST // provide test data sentence if no device connected
-// #define WEBLOG // configure logging via web server
 
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
@@ -34,12 +34,9 @@
 #define USE_N2K_CAN 7 // #define for NMEA2000_CAN library for use with ESP32
 
 #include <Arduino.h>
-// #include <M5stack.h>
 #include <N2kMessages.h>
 #include <NMEA2000_CAN.h> // This will automatically choose right CAN library and create suitable NMEA2000 object
 #include <Preferences.h>
-#include <string.h>
-// #include <sys/time.h>
 #include <ESPmDNS.h>
 #include <Update.h>
 #include <WebServer.h>
@@ -63,12 +60,6 @@ const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
 #define N2K_LOAD_LEVEL 1 // Device power load on N2k bus in multiples of 50mA
 
 HardwareSerial SerRS485(2);
-
-/*const int MIN_LOG_LEVEL = 6;
-String LOG_LEVEL_NAMES[] = { "OFF", "FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "ALL" };
-String setupLogText = "";
-String loopLogText = "";
-*/
 
 typedef struct {
     int
@@ -115,25 +106,15 @@ bool IsTimeToUpdate(unsigned long NextUpdate);
 unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 
-// Wifi settings for OTA update (if not defined in secrets.h replace your SSID/PW here)
-/* const char* WIFI_HOST = "batteryesp32";
-const char* WIFI_SSID = SECRET_WIFI_SSID; // Wifi network name (SSID)
-const char* WIFI_PASSWORD = SECRET_WIFI_PASSWORD; // Wifi network password
-const IPAddress ApIpAddress(192, 168, 21, 1); // Wifi access point server ip address
-const IPAddress ApGateway(192, 168, 21, 1); // Wifi access point server gateway
-const IPAddress ApSubnet(255, 255, 255, 0); // Wifi access point server subnet
-const int WEBSERVER_PORT = 80;
-*/
-
 // Set webserver object and Port for the OTA webserver
 WebServer otaServer (WEBSERVER_PORT);
 
-const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
-const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
-const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
-WiFiMulti wifiMulti;
+//const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
+//const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
+//const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
+//WiFiMulti wifiMulti;
 
-//-------------------------------------------------------------------------------------
+/*//-------------------------------------------------------------------------------------
 // Configuration of the NTP-Server
 //-------------------------------------------------------------------------------------
 
@@ -141,6 +122,7 @@ WiFiMulti wifiMulti;
 const char* NTP_SERVER = "pool.ntp.org";
 const long GMT_OFFSET_SEC = 3600;
 const int DAYLIGHT_OFFSET_SEC = 3600;
+*/
 
 //-------------------------------------------------------------------------------------
 //   setup
@@ -150,9 +132,6 @@ void setup()
     uint8_t chipid[6];
     uint32_t id = 0;
     int i = 0;
-
-//    loginIndex = OTA_LoginPage();
-//    updateIndex = OTA_updatePage();
 
 #ifdef DEBUG
     Serial.begin(115200); // Activate debugging via serial monitor
@@ -164,11 +143,11 @@ void setup()
     //  Disable bluetooth since we don't need it
     btStop();
 
-    /*  // Reduce CPU frequency to save power
-        debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-        setCpuFrequencyMhz(80);
-        debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-    */
+//      // Reduce CPU frequency to save power
+//        debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+//        setCpuFrequencyMhz(80);
+//        debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+
     SerRS485.begin(115200, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN); // Initialize RS485 communication
     delay(100);
 
@@ -223,12 +202,6 @@ void setup()
     };
     delay(200);
 
-    // Connect to Wi-Fi network with SSID and password
-//    debugOutput("Setting WiFi access point ...", 6, true);
-//    WiFi.mode(WIFI_AP);
-//    WiFi.softAPConfig(ApIpAddress, ApGateway, ApSubnet);
-//    if(WiFi.softAP(WIFI_SSID, WIFI_PASSWORD)) {
-
     // Setup WiFi access point with SSID and password
     debugOutput("Setting WiFi access point ...", 6, true);
     switch (otaStartWifi()) {
@@ -243,16 +216,9 @@ void setup()
             debugOutput("Error setting up mDNS responder.", 2, true);
     }
 
-//    debugOutput("Access point: " + String(WIFI_SSID), 4, true);
-//    IPAddress IP = WiFi.softAPIP();
-//    debugOutput("AP IP address: " + String(IP), 4, true);
-//   Serial.println(IP);
-    
-//    }
-
     switch (otaDefineOTAWebServer(&otaServer)) {
         case 0:
-            debugOutput("Update success./nRebooting ...", 4, true);
+            debugOutput("Update success. Rebooting ...", 4, true);
             break;
         case 1:
             debugOutput("Error updating firmware.", 2, true);
@@ -271,10 +237,6 @@ void loop()
 {
     int SourceAddress;
 
-#ifdef WEBLOG
-    //  ensureWIFIConnection();
-    //  server.handleClient();
-#endif
     debugOutput("_____________ Next loop _____________\n\n", 5);
 
     otaServer.handleClient();
@@ -414,7 +376,7 @@ bool BMparseData(const String data, const char* MsgCmd)
     debugOutput("CompareTo: <" + String(c_MsgCmd) + ">", 6);
 
     if (c_MsgCmd == MsgCmd) { // data sentence is of correct type
-        // separate data sentence into individual data fields
+        // split data sentence into individual data fields
         i = -1;
         startIdx = data.indexOf(','); // search for 1st data field after command + device address -> checksum
         nextIdx = data.indexOf(',', startIdx + 1); // search for end of current data field
@@ -564,48 +526,3 @@ void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period)
     while (NextUpdate < millis())
         NextUpdate += Period;
 }
-
-#ifdef WEBLOG
-void ensureWIFIConnection()
-{
-    if (WiFi.status() != WL_CONNECTED) {
-        debugOutput("No WIFI Connection found. Re-establishing...", 3, true);
-        int connectionRetry = 0;
-        while ((wifiMulti.run(CONNECTION_TIMEOUT_MS) != WL_CONNECTED)) {
-            delay(1000);
-            connectionRetry++;
-            debugOutput("WLAN Connection attempt number " + String(connectionRetry), 4, true);
-            if (connectionRetry > MAX_CONNECTION_RETRY) {
-                debugOutput("Connection Failed! Rebooting...", 4, true);
-                delay(5000);
-                ESP.restart();
-            }
-        }
-        debugOutput("WiFi is connected", 4, true);
-        debugOutput("IP address: " + (WiFi.localIP().toString()), 4, true);
-        debugOutput("Connected to (SSID): " + String(WiFi.SSID()), 5, true);
-        debugOutput("Signal strength (RSSI): " + String(WiFi.RSSI()) + "(-50 = perfect / -100 no signal)", 5, true);
-    }
-}
-
-String renderHtml(String header, String body)
-{
-    // HTML & CSS contents which display on web server
-    String html = "";
-    html = html + "<!DOCTYPE html>\n<html>\n" + "<html lang='de'>\n<head>\n<meta charset='utf-8'>\n<title>" + header + "</title>\n</head><body>\n<h1>";
-    html = html + header + "</h1>\n";
-    html = html + body + "\n</body>\n</html>\n";
-    return html;
-}
-
-void respondRequestWithLogEntries()
-{
-    String header = "Debugging-Log-Entries";
-    String body = "";
-    body = "<h2>Logging on Startup / during configuration (Setup-Log)</h2>\n";
-    body = body + setupLogText;
-    body = body + "<h2>Logging during operation (Loop-Log)</h2>\n";
-    body = body + loopLogText;
-    server.send(200, "text/html; charset=utf-8", renderHtml(header, body));
-}
-#endif
