@@ -34,10 +34,10 @@
 #define USE_N2K_CAN 7 // #define for NMEA2000_CAN library for use with ESP32
 
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include <N2kMessages.h>
 #include <NMEA2000_CAN.h> // This will automatically choose right CAN library and create suitable NMEA2000 object
 #include <Preferences.h>
-#include <ESPmDNS.h>
 #include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -46,14 +46,16 @@
 #include <WiFiMulti.h>
 
 #include "debugoutput.h" // standardized debug messages to Serial
-#include "otaupdate.h"  // all parameter and functions for WiFi access point and OTA update
+#include "otaupdate.h" // all parameter and functions for WiFi access point and OTA update
 
 #define BM_ADDRESS 1 // battery monitor device address
 #define BM_MAX_MSG_NO 27 // battery monitor max no. of message fields, incl. checksum
 #define BM_MAX_MSG_SIZE 125 // battery monitor max message size (current max R51 message size is 113 chars)
 const char BM_RBASE_CMD[] = "R00"; // battery monitor read state command
-const char BM_RMSG_CMD[] = "R50"; // battery monitor read measures command
+const char BM_RMSR_CMD[] = "R50"; // battery monitor read measures command
 const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
+#define BM_TYPE_KLF 2 // battery monitor BM type is KL-F series
+#define BM_TYPE_KHF 4 // battery monitor BM type is KH-F series
 
 #define TempSendOffset 0 // variable name to be changed
 #define SlowDataUpdatePeriod 1000 // Time between CAN Messages sent
@@ -63,10 +65,9 @@ HardwareSerial SerRS485(2);
 
 typedef struct {
     int
+        bmType,
         deviceAddress,
         checksum,
-        temperature,
-        reserved,
         outputState,
         currentDir,
         timeAdjust,
@@ -74,16 +75,21 @@ typedef struct {
         stateOfHealth;
     long
         operationRecVal,
+        temperature,
+        reserved,
         date,
         lastReadTime,
-        batteryTimeLeft;
+        batteryTimeLeft,
+        battRuntime;
     float
         voltage,
         current,
         remainingCapacity,
         totalCapacity,
         dischargedKWh,
-        chargedKWh;
+        dischargedAh,
+        chargedKWh,
+        intResist;
     char
         msgType[5];
     unsigned char
@@ -93,7 +99,7 @@ typedef struct {
 } batteryData_t;
 
 // battery data store and static battery data initialization -> adjust
-batteryData_t batteryData = { .stateOfHealth = 100, .instance = 0x02, .batteryType = N2kDCt_Battery };
+batteryData_t batteryData = { .stateOfHealth = 1, .instance = 0x02, .batteryType = N2kDCt_Battery };
 String BMDataSentence; // raw string of BM measured values
 
 int NodeAddress; // To store last N2k device node address
@@ -107,12 +113,12 @@ unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 
 // Set webserver object and Port for the OTA webserver
-WebServer otaServer (WEBSERVER_PORT);
+WebServer otaServer(WEBSERVER_PORT);
 
-//const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
-//const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
-//const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
-//WiFiMulti wifiMulti;
+// const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
+// const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
+// const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
+// WiFiMulti wifiMulti;
 
 /*//-------------------------------------------------------------------------------------
 // Configuration of the NTP-Server
@@ -143,14 +149,20 @@ void setup()
     //  Disable bluetooth since we don't need it
     btStop();
 
-//      // Reduce CPU frequency to save power
-//        debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-//        setCpuFrequencyMhz(80);
-//        debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+    //      // Reduce CPU frequency to save power
+    //        debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+    //        setCpuFrequencyMhz(80);
+    //        debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
 
     SerRS485.begin(115200, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN); // Initialize RS485 communication
     delay(100);
 
+    // Identify battery monitor type and battery capacity
+    if (BMGetBatteryMonitortype(BM_ADDRESS)) {
+        debugOutput("Battery monitor device type is: " + String(batteryData.bmType), 4, true);
+    } else {
+        debugOutput("Error retreiving battery monitor device type", 2, true);
+    }
     if (BMGetBatterySettings(BM_ADDRESS)) {
         debugOutput("Total battery capacity: " + String(batteryData.totalCapacity) + " kWh", 4, true);
     } else {
@@ -205,23 +217,23 @@ void setup()
     // Setup WiFi access point with SSID and password
     debugOutput("Setting WiFi access point ...", 6, true);
     switch (otaStartWifi()) {
-        case 0:
-            debugOutput("Established WiFi access point", 4, true);
-            debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
-            break;
-        case 1:
-            debugOutput("Error setting up WiFi access point", 2, true);
-            break;
-        case 2:
-            debugOutput("Error setting up mDNS responder.", 2, true);
+    case 0:
+        debugOutput("Established WiFi access point", 4, true);
+        debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
+        break;
+    case 1:
+        debugOutput("Error setting up WiFi access point", 2, true);
+        break;
+    case 2:
+        debugOutput("Error setting up mDNS responder.", 2, true);
     }
 
     switch (otaDefineOTAWebServer(&otaServer)) {
-        case 0:
-            debugOutput("Update success. Rebooting ...", 4, true);
-            break;
-        case 1:
-            debugOutput("Error updating firmware.", 2, true);
+    case 0:
+        debugOutput("Update success. Rebooting ...", 4, true);
+        break;
+    case 1:
+        debugOutput("Error updating firmware.", 2, true);
     }
 
     otaServer.begin();
@@ -242,7 +254,7 @@ void loop()
     otaServer.handleClient();
 
     if (BMGetBatteryState(BM_ADDRESS)) {
-            SendN2kBatteryState();
+        SendN2kBatteryState();
     } else {
         debugOutput("Error retreiving battery state", 2);
     }
@@ -260,18 +272,18 @@ void loop()
     delay(1000);
 }
 
-bool BMGetBatteryState(const int BMaddress)
+bool BMGetBatteryMonitortype(const int BMaddress)
 {
-    BMSendCmd(BM_RMSG_CMD, BMaddress);
+    BMSendCmd(BM_RBASE_CMD, BMaddress);
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data when no device needs is connected
+    BMDataSentence = ":r00=1,206,2110,132,3,\r\n"; // test data -> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
 
-    if (BMparseData(BMDataSentence, BM_RMSG_CMD)) {
+    if (BMparseData(BMDataSentence, BM_RBASE_CMD)) {
         return true;
     } else {
         debugOutput("Error parsing data sentence!", 2);
@@ -285,12 +297,31 @@ bool BMGetBatterySettings(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
+    BMDataSentence = ":r51=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data (currently wrong)-> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
 
     if (BMparseData(BMDataSentence, BM_RSETT_CMD)) {
+        return true;
+    } else {
+        debugOutput("Error parsing data sentence!", 2);
+        return false;
+    }
+}
+
+bool BMGetBatteryState(const int BMaddress)
+{
+    BMSendCmd(BM_RMSR_CMD, BMaddress);
+    BMDataSentence = BMreadMsg();
+
+#ifdef TEST
+    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data when no device needs is connected
+#endif
+
+    debugOutput("Message: " + BMDataSentence, 5);
+
+    if (BMparseData(BMDataSentence, BM_RMSR_CMD)) {
         return true;
     } else {
         debugOutput("Error parsing data sentence!", 2);
@@ -337,7 +368,6 @@ String BMreadMsg()
         }
     }
 
-    // to be corrected "sizeof"
     if (sizeof(receivedData) / sizeof(receivedData[0]) == 0) {
         debugOutput("No data received", 2);
     } else {
@@ -355,14 +385,7 @@ String BMreadMsg()
 
 bool BMparseData(const String data, const char* MsgCmd)
 {
-    // KH-F data format:
-    // * Measures - :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<discharged_kWh>,<charged_kWh>,<op_record_val>,
-    //                   <temp>,<reserved>,<output_state>,<current_direction>,<remaining_time>,<time_adj>,<date>,<time>
-    // * State -    :r51=<addr>,<checksum>,<overvolt_prot>,<undervolt_prot>,<overdischrg_prot>,<overchrg_prot>,<overpwr_prot>,<overtmp_prot>,<prot_rcvr_time>,
-    //                   <prot_delay_time>,<batt_cap>,<volt_clbr>,<curr_clbr>,<temp_clbr>,<undef_func>,<relay_type>,<curr_mltplr>,<time_clbr>,<logging>,
-    //                   <full_chrg_volt>,<low_batt_volt>,<full_chrg_curr>,<monitor_time>,<low_temp_prot>,<temp_unit>,<bluet_pwd>,datalog_interval>
-
-    char c_MsgNr[3] = ""; // pure message command number w/o leading character
+    char c_MsgNr[3] = ""; // pure message command number w/o leading ":" colon character
     String c_MsgCmd;
     int i, dataSetNo;
     long dataSet[BM_MAX_MSG_NO];
@@ -401,12 +424,96 @@ bool BMparseData(const String data, const char* MsgCmd)
         return false;
     }
 
-    if (c_MsgCmd == BM_RSETT_CMD) { // data sentence contains battery settings values
+    // determine battery monitor device type - only once on startup
+    if (c_MsgCmd == BM_RBASE_CMD) { // data sentence contains BM type basic information
+        i = int(dataSet[1] / 1000); // read left digit from data
+        switch (i) {
+        case 2:
+            batteryData.bmType = BM_TYPE_KLF;
+            break;
+        case 4:
+            batteryData.bmType = BM_TYPE_KHF;
+            break;
+        default:
+            batteryData.bmType = 0; // no supported BM type could be determined
+            debugOutput("Supported BM device type could not be determined. Reported type is: " + String(batteryData.bmType), 7);
+        }
+        debugOutput("BM device type: " + String(batteryData.bmType), 7);
+    }
+
+    switch (batteryData.bmType) {
+    case BM_TYPE_KLF:
+        BMassignDataKLF(c_MsgCmd, dataSet);
+        break;
+    case BM_TYPE_KHF:
+        BMassignDataKHF(c_MsgCmd, dataSet);
+        break;
+    default:
+        return false; // should never get here
+    }
+
+    return true;
+}
+
+void BMassignDataKLF(String c_MsgCmd, long *dataSet)
+{
+    // KL-F data format:
+    // * Base Info - :r00=<addr>,<checksum>,<model>,<sw_version>,<ser_no>
+    // * Measures -  :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<consumed_amph>,<charged_kWh>,<runtime>,<temp>,<reserved>,<output_state>,
+    //                    <current_direction>,<remaining_time>,<int_resistance>
+    // * State -     :r51=<addr>,<checksum>,<overvolt_prot>,<undervolt_prot>,<overdischrg_prot>,<overchrg_prot>,<overpwr_prot>,<overtmp_prot>,<prot_rcvr_time>,
+    //                    <prot_delay_time>,<batt_cap>,<volt_clbr>,<curr_clbr>,<temp_clbr>,<undef_func>,<relay_type>,<curr_mltplr>,<volt_crv_scale>,<amp_crv_scale>
+
+    if (c_MsgCmd == BM_RMSR_CMD) { // data sentence contains battery measure values
+
+        batteryData.checksum = int(dataSet[0]); // conversion of long to int, since "String.toInt()" returns "long"
+        batteryData.voltage = float(dataSet[1]) / 100;
+        batteryData.current = float(dataSet[2]) / 100;
+        batteryData.remainingCapacity = float(dataSet[3]) / 1000; // decimals are delivering 3 digits of precision; any output is limited to 2 digits of precision, though
+        batteryData.dischargedAh = float(dataSet[4]) / 1000;
+        batteryData.chargedKWh = float(dataSet[5]) / 1000;
+        batteryData.battRuntime = long(dataSet[6]);
+        batteryData.temperature = long(dataSet[7] - 100);
+        batteryData.reserved = long(dataSet[8]);
+        batteryData.outputState = int(dataSet[9]);
+        batteryData.currentDir = int(dataSet[10]);
+        batteryData.batteryTimeLeft = long(dataSet[11]);
+        batteryData.intResist = float(dataSet[12])/100;
+        batteryData.stateOfCharge = int(batteryData.remainingCapacity / batteryData.totalCapacity * 100);
+
+        debugOutput("Checksum: " + String(batteryData.checksum), 5);
+        debugOutput("Voltage: " + String(batteryData.voltage) + " V", 5);
+        debugOutput("Current: " + String(batteryData.current) + " A", 5);
+        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " kWh", 5);
+        debugOutput("Discharged Ah: " + String(batteryData.dischargedAh) + " Ah", 5);
+        debugOutput("Charged kWh: " + String(batteryData.chargedKWh) + " kWh", 5);
+        debugOutput("Battery runtime: " + String(batteryData.battRuntime), 5);
+        debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 5);
+        debugOutput("Reserved: " + String(batteryData.reserved), 5);
+        debugOutput("Output state: " + String(batteryData.outputState), 5);
+        debugOutput("Current direction: " + String(batteryData.currentDir), 5);
+        debugOutput("Remaining batt time: " + String(batteryData.batteryTimeLeft) + " min.", 5);
+        debugOutput("Battery internal resistance: " + String(batteryData.intResist) + " mOhm", 5);
+        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %" + "\n", 5);
+
+    } else if (c_MsgCmd == BM_RSETT_CMD) { // data sentence contains battery settings values
 
         batteryData.totalCapacity = float(dataSet[9]) / 10;
         debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " kWh", 5);
+    }
+}
 
-    } else if (c_MsgCmd == BM_RMSG_CMD) { // data sentence contains battery measure values
+void BMassignDataKHF(String c_MsgCmd, long *dataSet)
+{
+    // KH-F data format:
+    // * Base Info - :r00=<addr>,<checksum>,<model>,<sw_version>,<ser_no>
+    // * Measures -  :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<discharged_kWh>,<charged_kWh>,<op_record_val>,
+    //                    <temp>,<reserved>,<output_state>,<current_direction>,<remaining_time>,<time_adj>,<date>,<time>
+    // * State -     :r51=<addr>,<checksum>,<overvolt_prot>,<undervolt_prot>,<overdischrg_prot>,<overchrg_prot>,<overpwr_prot>,<overtmp_prot>,<prot_rcvr_time>,
+    //                    <prot_delay_time>,<batt_cap>,<volt_clbr>,<curr_clbr>,<temp_clbr>,<undef_func>,<relay_type>,<curr_mltplr>,<time_clbr>,<logging>,
+    //                    <full_chrg_volt>,<low_batt_volt>,<full_chrg_curr>,<monitor_time>,<low_temp_prot>,<temp_unit>,<bluet_pwd>,datalog_interval>
+
+    if (c_MsgCmd == BM_RMSR_CMD) { // data sentence contains battery measure values
 
         batteryData.checksum = int(dataSet[0]); // conversion of double to int, since "String.toInt()" returns "long"
         batteryData.voltage = float(dataSet[1]) / 100;
@@ -414,15 +521,15 @@ bool BMparseData(const String data, const char* MsgCmd)
         batteryData.remainingCapacity = float(dataSet[3]) / 1000; // decimals are delivering 3 digits of precision; any output is limited to 2 digits of precision, though
         batteryData.dischargedKWh = float(dataSet[4]) / 1000;
         batteryData.chargedKWh = float(dataSet[5]) / 1000;
-        batteryData.operationRecVal = int(dataSet[6]);
-        batteryData.temperature = int(dataSet[7] - 100);
-        batteryData.reserved = int(dataSet[8]);
+        batteryData.operationRecVal = long(dataSet[6]);
+        batteryData.temperature = long(dataSet[7] - 100);
+        batteryData.reserved = long(dataSet[8]);
         batteryData.outputState = int(dataSet[9]);
         batteryData.currentDir = int(dataSet[10]);
         batteryData.batteryTimeLeft = long(dataSet[11]);
         batteryData.timeAdjust = int(dataSet[12]);
-        batteryData.date = dataSet[13];
-        batteryData.lastReadTime = dataSet[14];
+        batteryData.date = long(dataSet[13]);
+        batteryData.lastReadTime = long(dataSet[14]);
         batteryData.stateOfCharge = int(batteryData.remainingCapacity / batteryData.totalCapacity * 100);
 
         debugOutput("Checksum: " + String(batteryData.checksum), 5);
@@ -439,13 +546,14 @@ bool BMparseData(const String data, const char* MsgCmd)
         debugOutput("Remaining batt time: " + String(batteryData.batteryTimeLeft) + " min.", 5);
         debugOutput("Time adjust: " + String(batteryData.timeAdjust), 5);
         debugOutput("Date: " + String(batteryData.date), 5);
-        debugOutput("Time: " + String(batteryData.lastReadTime) + "\n", 5);
+        debugOutput("Time: " + String(batteryData.lastReadTime), 5);
+        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %" + "\n", 5);
 
-        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %", 5);
-        debugOutput("State of health SOH: " + String(batteryData.stateOfHealth) + " %", 5);
+    } else if (c_MsgCmd == BM_RSETT_CMD) { // data sentence contains battery settings values
+
+        batteryData.totalCapacity = float(dataSet[9]) / 10;
+        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " kWh", 5);
     }
-
-    return true;
 }
 
 // Check checksum of last battery monitor message read
@@ -494,7 +602,7 @@ void SendN2kBatteryState(void)
         double battTemperature = CToKelvin(double(batteryData.temperature));
         tN2kDCType battType = batteryData.batteryType;
         unsigned char battSOC = (unsigned char)(batteryData.stateOfCharge);
-        unsigned char battSOH = batteryData.stateOfHealth;
+        unsigned char battSOH = (unsigned char)(batteryData.stateOfHealth);
         double battTimeLeft = double(batteryData.batteryTimeLeft * 60); // remaining battery time is expected to be in seconds for N2k PGN 127506
         double battTotalCap = AhToCoulomb(double(batteryData.totalCapacity));
 
