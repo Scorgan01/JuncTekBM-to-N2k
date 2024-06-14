@@ -1,5 +1,5 @@
 # JuncTekBM-to-N2k
-Reads JuncTek KH-F series battery monitor data from its RS485 interface and converts it to NMEA2000.
+Reads JuncTek KH-F and KL-F series battery monitor data from its RS485 interface and converts it to NMEA2000.
 Designed for M5Stack Atom Lite ESP32 processor + Tail485 and CAN modules.
 
 Creates NMEA 2000 PGNs
