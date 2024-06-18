@@ -31,15 +31,15 @@ The code has been implemented with the platformIO IDE. You can find the full set
 
 <b>OTA firmware update</b><br>
 You can update the device with a new firmware via WiFi.
-The device creates an own WiFi access point after startup for 5 minutes. You can call the web update page with these parameters:
-SSID: BatteryWiFi
-Password: 12345678
-IP address: 192.168.21.1
-Device name: batteryesp32.local
-URL: http://batteryesp32.local
-Default login credentials: admin/admin
+The device creates an own WiFi access point after startup for 5 minutes. You can call the web update page with these parameters:<br>
+SSID: BatteryWiFi<br>
+Password: 12345678<br>
+IP address: 192.168.21.1<br>
+Device name: batteryesp32.local<br>
+URL: http://batteryesp32.local<br>
+Default login credentials: admin/admin<br>
 You can change the WiFi parameters in <wifisecrets.h> and IP parameters in <otaupdate.h>.<br>
-The device will shutdown the WiFi AP after 5 minutes in order not to run the WiFi unnecessarily. Restart the device, if you missed to update the device within that timeframe.
+The device will shutdown the WiFi AP after 5 minutes in order not to run the WiFi unnecessarily. Restart the device, if you missed to update the device within that timeframe.<br>
 Be careful: There is no validation of the firmware file. You need to know what you are doing.
 
 Kudos:<br>
