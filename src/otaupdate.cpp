@@ -17,7 +17,7 @@ int otaStartWifi() // Setup WiFi access point with SSID and password
 
     debugOutput("Access point: " + String(SECRET_WIFI_SSID), 4, true);
     IPAddress IP = WiFi.softAPIP();
-    debugOutput("AP IP address: " + String(IP), 4, true);
+    debugOutput("AP IP address: ", 4, true);
     Serial.println(IP);
 
     if (!MDNS.begin(WIFI_HOST)) { // use mdns for host name resolution -> http://batteryesp32.local
@@ -66,7 +66,7 @@ int otaDefineOTAWebServer(WebServer* server) // Define OTA web server with code 
             }
         } else if (upload.status == UPLOAD_FILE_END) {
             if (Update.end(true)) { // true to set the size to the current progress
-                debugOutput("Update success. Rebooting ...", 4, true);
+                debugOutput("Update success. Rebooting ...", 4);
                 Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
             } else {
                 Update.printError(Serial);

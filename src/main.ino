@@ -13,7 +13,7 @@
 
 /* Reads battery RS485 messages from Junctek KH1x0F battery monitor and forwards them to N2k bus
    Creates N2k messages: 127508 - battery status, 127506 - DC detailed status, (126996 - product info)
-   Version 0.9, 30/03/2024, Scorgan - Ulrich Meine
+   Version 0.9, 09/06/2024, Scorgan - Ulrich Meine
 
    Battery monitor message reading and parsing takes ideas from: PlJakobs https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main
    Uses the great work of Timo Lappalainen and his NMEA 2000 libraries: https://github.com/ttlappalainen
@@ -23,8 +23,10 @@
    Design OTA web page: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/
 */
 
+// need some code clean-up (e.g. #includes WiFiMulti, ...) and debug messages (e.g. OTA update wrong status)
+
 #define DEBUG // Flag to activate logging to serial console (i.e. serial monitor in arduino ide)
-// #define TEST // provide test data sentence if no device connected
+#define TEST // provide test data sentence if no device connected
 
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
@@ -40,10 +42,6 @@
 #include <Preferences.h>
 #include <Update.h>
 #include <WebServer.h>
-#include <WiFi.h>
-#include <WiFiAP.h>
-#include <WiFiClient.h>
-#include <WiFiMulti.h>
 
 #include "debugoutput.h" // standardized debug messages to Serial
 #include "otaupdate.h" // all parameter and functions for WiFi access point and OTA update
@@ -108,12 +106,15 @@ const unsigned long TransmitMessages[] PROGMEM = { 127506UL, // DC detailed stat
     127508UL, // battery status
     0 };
 
+unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
+
 bool IsTimeToUpdate(unsigned long NextUpdate);
 unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 
 // Set webserver object and Port for the OTA webserver
 WebServer otaServer(WEBSERVER_PORT);
+bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
 
 // const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
 // const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
@@ -158,11 +159,21 @@ void setup()
     delay(100);
 
     // Identify battery monitor type and battery capacity
-    if (BMGetBatteryMonitortype(BM_ADDRESS)) {
-        debugOutput("Battery monitor device type is: " + String(batteryData.bmType), 4, true);
-    } else {
-        debugOutput("Error retreiving battery monitor device type", 2, true);
+    timeout = 30; // time limit in seconds
+    startTime = millis();
+    while (!BMGetBatteryMonitortype(BM_ADDRESS)) {
+        loopTime = (millis() - startTime) / 1000;
+        debugOutput("Error retreiving battery monitor device type for seconds: " + String(loopTime), 2, true);
+        if (loopTime < timeout) {
+            delay(2000);
+        } else {
+            debugOutput("Unable to retreive battery monitor device type. Restarting.", 1, true);
+            ESP.restart();
+        }
     }
+    debugOutput("Battery monitor device type is: " + String(batteryData.bmType), 4, true);
+
+    // Identify battery capacity
     if (BMGetBatterySettings(BM_ADDRESS)) {
         debugOutput("Total battery capacity: " + String(batteryData.totalCapacity) + " kWh", 4, true);
     } else {
@@ -215,11 +226,13 @@ void setup()
     delay(200);
 
     // Setup WiFi access point with SSID and password
+    OtaWifiAPUP = false;
     debugOutput("Setting WiFi access point ...", 6, true);
     switch (otaStartWifi()) {
     case 0:
         debugOutput("Established WiFi access point", 4, true);
         debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
+        OtaWifiAPUP = true;
         break;
     case 1:
         debugOutput("Error setting up WiFi access point", 2, true);
@@ -228,6 +241,7 @@ void setup()
         debugOutput("Error setting up mDNS responder.", 2, true);
     }
 
+    // wrong error message handling
     switch (otaDefineOTAWebServer(&otaServer)) {
     case 0:
         debugOutput("Update success. Rebooting ...", 4, true);
@@ -238,8 +252,9 @@ void setup()
 
     otaServer.begin();
 
-    // if no WiFi update, disable WiFi after 2 minutes
-    //  WiFi.mode(WIFI_OFF);
+    // set timeout and start time for OTA update time limit
+    timeout = 300; // time limit for WiFi AP shutdown in seconds
+    startTime = millis();
 }
 
 //-------------------------------------------------------------------------------------
@@ -251,7 +266,22 @@ void loop()
 
     debugOutput("_____________ Next loop _____________\n\n", 5);
 
-    otaServer.handleClient();
+    // Check for OTA web access
+    if (OtaWifiAPUP) {
+        loopTime = (millis() - startTime) / 1000;
+        if (loopTime < timeout) {
+            otaServer.handleClient();
+        } else {
+            // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
+            otaServer.stop();
+            if (WiFi.mode(WIFI_OFF)) {
+                debugOutput("Shutdown OTA WiFi access point. No firmware update occured.", 4);
+                OtaWifiAPUP = false;
+            } else {
+                debugOutput("Shutdown OTA WiFi access point failed.", 3);
+            }
+        };
+    }
 
     if (BMGetBatteryState(BM_ADDRESS)) {
         SendN2kBatteryState();
@@ -455,7 +485,7 @@ bool BMparseData(const String data, const char* MsgCmd)
     return true;
 }
 
-void BMassignDataKLF(String c_MsgCmd, long *dataSet)
+void BMassignDataKLF(String c_MsgCmd, long* dataSet)
 {
     // KL-F data format:
     // * Base Info - :r00=<addr>,<checksum>,<model>,<sw_version>,<ser_no>
@@ -478,7 +508,7 @@ void BMassignDataKLF(String c_MsgCmd, long *dataSet)
         batteryData.outputState = int(dataSet[9]);
         batteryData.currentDir = int(dataSet[10]);
         batteryData.batteryTimeLeft = long(dataSet[11]);
-        batteryData.intResist = float(dataSet[12])/100;
+        batteryData.intResist = float(dataSet[12]) / 100;
         batteryData.stateOfCharge = int(batteryData.remainingCapacity / batteryData.totalCapacity * 100);
 
         debugOutput("Checksum: " + String(batteryData.checksum), 5);
@@ -503,7 +533,7 @@ void BMassignDataKLF(String c_MsgCmd, long *dataSet)
     }
 }
 
-void BMassignDataKHF(String c_MsgCmd, long *dataSet)
+void BMassignDataKHF(String c_MsgCmd, long* dataSet)
 {
     // KH-F data format:
     // * Base Info - :r00=<addr>,<checksum>,<model>,<sw_version>,<ser_no>
