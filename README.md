@@ -17,17 +17,17 @@ Battery data delivered with these messages are
   - Remaining battery time (seconds)
   - Battery capacity (Coulomb)
 
-<b>Important hint:</b><br>
-The RS485 connection of my two JuncTek battery monitor devices with the "Tail485" interface for M5Stack Atom required a terminator resistor between the A and B data lines.
-So, I put a small 1/10 watt resistor of 120 Ohm in parallel to the two wires. Anything between 100-150 Ohms should work.
-Without that resistor, the M5Stack Atom was not able to read clear data from the battery monitors.
-
 Required libraries are
 - ttlappalainen/NMEA2000-library@ v4.21.3
 - ttlappalainen/NMEA2000_esp32@ v1.0.3
 -	khoih-prog/ESP_WiFiManager_Lite@ v1.10.5
 
 The code has been implemented with the platformIO IDE. You can find the full set of project parameters at the <platformio.ini> file.
+
+<b>Important hint:</b><br>
+The RS485 connection of my two JuncTek battery monitor devices with the "Tail485" interface for M5Stack Atom required a terminator resistor between the A and B data lines.
+So, I put a small 1/10 watt resistor of 120 Ohm in parallel to the two wires. Anything between 100-150 Ohms should work.
+Without that resistor, the M5Stack Atom was not able to read clear data from the battery monitors.
 
 <b>OTA firmware update</b><br>
 You can update the device with a new firmware via WiFi.
