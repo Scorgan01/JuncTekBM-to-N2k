@@ -45,8 +45,8 @@
 const char BM_RBASE_CMD[] = "R00"; // battery monitor read state command
 const char BM_RMSR_CMD[] = "R50"; // battery monitor read measures command
 const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
-#define BM_TYPE_KLF 2 // battery monitor BM type is KL-F series
-#define BM_TYPE_KHF 4 // battery monitor BM type is KH-F series
+#define BM_TYPE_KLF 2 // battery monitor type is KL-F series
+#define BM_TYPE_KHF 4 // battery monitor type is KH-F series
 
 #define TempSendOffset 0 // variable name to be changed
 #define SlowDataUpdatePeriod 1000 // Time between CAN Messages sent
