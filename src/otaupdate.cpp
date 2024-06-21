@@ -101,7 +101,7 @@ void otaDefineOTAWebPages(String& pg_login, String& pg_update) // Define OTA log
 
     pg_update = "<body>"
                 "<form method='POST' action='#' enctype='multipart/form-data' id='upload-form'>"
-                "<h1>BatteryESP32 Update</h1>"
+                "<h1>BatteryESP32 OTA Update</h1>"
                 "<input type='file' name='update'>"
                 "<input type='submit' class=btn value='Update'>"
                 "<div style='width:100%;background-color:#e0e0e0;border-radius:8px;'>"
