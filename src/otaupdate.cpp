@@ -20,7 +20,7 @@ int otaStartWifi() // Setup WiFi access point with SSID and password
     debugOutput("AP IP address: ", 4, true);
     Serial.println(IP);
 
-    if (!MDNS.begin(WIFI_HOST)) { // use mdns for host name resolution -> http://batteryesp32.local
+    if (!MDNS.begin(WIFI_HOST)) { // use mdns for host name resolution
         errorCode = 2; // error mDNS responder setup
     }
 
@@ -53,8 +53,7 @@ int otaDefineOTAWebServer(WebServer* server) // Define OTA web server with code 
             ESP.restart(); }, [server, &errorCode]() {
         HTTPUpload& upload = server->upload();
         if (upload.status == UPLOAD_FILE_START) {
-            debugOutput("Update: " + upload.filename, 4, true);
-            Serial.printf("Update: %s\n", upload.filename.c_str());
+            debugOutput("Update: " + upload.filename, 4);
             if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { // start with max available size
                 Update.printError(Serial);
             }
@@ -66,8 +65,7 @@ int otaDefineOTAWebServer(WebServer* server) // Define OTA web server with code 
             }
         } else if (upload.status == UPLOAD_FILE_END) {
             if (Update.end(true)) { // true to set the size to the current progress
-                debugOutput("Update success. Rebooting ...", 4);
-                Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+                debugOutput("Update success. Rebooting ..." + String(upload.totalSize), 4);
             } else {
                 Update.printError(Serial);
                 errorCode = 1; // error updating firmware
@@ -103,7 +101,7 @@ void otaDefineOTAWebPages(String& pg_login, String& pg_update) // Define OTA log
 
     pg_update = "<body>"
                 "<form method='POST' action='#' enctype='multipart/form-data' id='upload-form'>"
-                "<h1>BatteryESP32 OTA</h1>"
+                "<h1>BatteryESP32 Update</h1>"
                 "<input type='file' name='update'>"
                 "<input type='submit' class=btn value='Update'>"
                 "<div style='width:100%;background-color:#e0e0e0;border-radius:8px;'>"

@@ -8,40 +8,33 @@
    Lesser General Public License for more details.
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-*/
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA */
 
-/* Reads battery RS485 messages from Junctek KH1x0F battery monitor and forwards them to N2k bus
+/* Reads JuncTek KH-F and KL-F series battery monitor data from its RS485 interface and converts it to NMEA2000.
    Creates N2k messages: 127508 - battery status, 127506 - DC detailed status, (126996 - product info)
-   Version 0.9, 09/06/2024, Scorgan - Ulrich Meine
+   Designed for M5Stack Atom Lite ESP32 processor + Tail485 and CAN modules.
+   Version 1.0, 22/06/2024, Scorgan - Ulrich Meine
 
-   Battery monitor message reading and parsing takes ideas from: PlJakobs https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main
    Uses the great work of Timo Lappalainen and his NMEA 2000 libraries: https://github.com/ttlappalainen
    All N2k handling uses code by AK-Homberger: https://github.com/AK-Homberger
-   Webserver logging by OER Informatik: https://gitlab.com/oer-informatik/mcu/arduino-esp/-/blob/main/src/loggingWLANWebpage/loggingWLANWebpage.ino
-   OTAWebUpdater.ino Example from ArduinoOTA Library: * Rui Santos http://randomnerdtutorials.com
-   Design OTA web page: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/
-*/
-
-// need some code clean-up (e.g. #includes WiFiMulti, ...) and debug messages (e.g. OTA update wrong status)
+   Battery monitor message reading and parsing takes ideas from PlJakobs https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main
+   OTA web update leverages the example from ArduinoOTA Library and work from Rui Santos for adjustments to work with WiFi AP: http://randomnerdtutorials.com
+   OTA web page design was inspired by: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/ */
 
 #define DEBUG // Flag to activate logging to serial console (i.e. serial monitor in arduino ide)
-#define TEST // provide test data sentence if no device connected
+// #define TEST // uncomment to provide test data sentences if no device is connected
 
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
 #define ESP32_CAN_RX_PIN GPIO_NUM_19 // set CAN RX port to 19
 #define RS485_RX_PIN GPIO_NUM_32 // define the RS485 RX port
 #define RS485_TX_PIN GPIO_NUM_26 // define the RS485 TX port
-#define USE_N2K_CAN 7 // #define for NMEA2000_CAN library for use with ESP32
+#define USE_N2K_CAN 7 // #define for NMEA2000_CAN library to ensure use with ESP32
 
 #include <Arduino.h>
-#include <ESPmDNS.h>
 #include <N2kMessages.h>
 #include <NMEA2000_CAN.h> // This will automatically choose right CAN library and create suitable NMEA2000 object
 #include <Preferences.h>
-#include <Update.h>
-#include <WebServer.h>
 
 #include "debugoutput.h" // standardized debug messages to Serial
 #include "otaupdate.h" // all parameter and functions for WiFi access point and OTA update
@@ -58,6 +51,9 @@ const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
 #define TempSendOffset 0 // variable name to be changed
 #define SlowDataUpdatePeriod 1000 // Time between CAN Messages sent
 #define N2K_LOAD_LEVEL 1 // Device power load on N2k bus in multiples of 50mA
+
+#define BMTYPE_READ_TIMEOUT 30 // time limit for getting battery monitor type in seconds
+#define WIFI_AP_TIMEOUT 300 // time limit for WiFi AP shutdown in seconds
 
 HardwareSerial SerRS485(2);
 
@@ -116,20 +112,6 @@ void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 WebServer otaServer(WEBSERVER_PORT);
 bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
 
-// const char* WEBSERVER_ROUTE_TO_DEBUG_OUTPUT = "/log";
-// const uint32_t CONNECTION_TIMEOUT_MS = 10000; // WiFi connect timeout per AP.
-// const uint32_t MAX_CONNECTION_RETRY = 20; // Reboot ESP after xx times connection errors
-// WiFiMulti wifiMulti;
-
-/*//-------------------------------------------------------------------------------------
-// Configuration of the NTP-Server
-//-------------------------------------------------------------------------------------
-
-#include "time.h"
-const char* NTP_SERVER = "pool.ntp.org";
-const long GMT_OFFSET_SEC = 3600;
-const int DAYLIGHT_OFFSET_SEC = 3600;
-*/
 
 //-------------------------------------------------------------------------------------
 //   setup
@@ -147,21 +129,21 @@ void setup()
 
     debugOutput("Starting Programm...", 6, true);
 
-    //  Disable bluetooth since we don't need it
+    // Disable bluetooth since we don't need it
     btStop();
 
-    //      // Reduce CPU frequency to save power
-    //        debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-    //        setCpuFrequencyMhz(80);
-    //        debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+    // Reduce CPU frequency to save power
+    // debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+    // setCpuFrequencyMhz(80);
+    // debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
 
     SerRS485.begin(115200, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN); // Initialize RS485 communication
     delay(100);
 
-    // Identify battery monitor type and battery capacity
-    timeout = 30; // time limit in seconds
+    // Identify battery monitor type
+    timeout = BMTYPE_READ_TIMEOUT; // time limit for getting battery monitor type in seconds
     startTime = millis();
-    while (!BMGetBatteryMonitortype(BM_ADDRESS)) {
+    while (!BMGetBatteryMonitorType(BM_ADDRESS)) {
         loopTime = (millis() - startTime) / 1000;
         debugOutput("Error retreiving battery monitor device type for seconds: " + String(loopTime), 2, true);
         if (loopTime < timeout) {
@@ -241,19 +223,11 @@ void setup()
         debugOutput("Error setting up mDNS responder.", 2, true);
     }
 
-    // wrong error message handling
-    switch (otaDefineOTAWebServer(&otaServer)) {
-    case 0:
-        debugOutput("Update success. Rebooting ...", 4, true);
-        break;
-    case 1:
-        debugOutput("Error updating firmware.", 2, true);
-    }
-
+    otaDefineOTAWebServer(&otaServer);
     otaServer.begin();
 
     // set timeout and start time for OTA update time limit
-    timeout = 300; // time limit for WiFi AP shutdown in seconds
+    timeout = WIFI_AP_TIMEOUT; // time limit for WiFi AP shutdown in seconds
     startTime = millis();
 }
 
@@ -264,7 +238,11 @@ void loop()
 {
     int SourceAddress;
 
-    debugOutput("_____________ Next loop _____________\n\n", 5);
+    if (MIN_LOG_LEVEL >= 5) {
+        debugOutput("_____________ Next loop _____________\n\n", 5);
+    } else if (MIN_LOG_LEVEL == 4) {
+        Serial.print(".");
+    }
 
     // Check for OTA web access
     if (OtaWifiAPUP) {
@@ -275,7 +253,7 @@ void loop()
             // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
             otaServer.stop();
             if (WiFi.mode(WIFI_OFF)) {
-                debugOutput("Shutdown OTA WiFi access point. No firmware update occured.", 4);
+                debugOutput("\nShutdown OTA WiFi access point. No firmware update occured.", 4);
                 OtaWifiAPUP = false;
             } else {
                 debugOutput("Shutdown OTA WiFi access point failed.", 3);
@@ -302,7 +280,7 @@ void loop()
     delay(1000);
 }
 
-bool BMGetBatteryMonitortype(const int BMaddress)
+bool BMGetBatteryMonitorType(const int BMaddress)
 {
     BMSendCmd(BM_RBASE_CMD, BMaddress);
     BMDataSentence = BMreadMsg();
@@ -327,7 +305,7 @@ bool BMGetBatterySettings(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r51=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data (currently wrong)-> no device needs to be connected
+    BMDataSentence = ":r51=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
@@ -346,7 +324,7 @@ bool BMGetBatteryState(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data when no device needs is connected
+    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
@@ -415,14 +393,12 @@ String BMreadMsg()
 
 bool BMparseData(const String data, const char* MsgCmd)
 {
-    char c_MsgNr[3] = ""; // pure message command number w/o leading ":" colon character
     String c_MsgCmd;
     int i, dataSetNo;
     long dataSet[BM_MAX_MSG_NO];
     int startIdx = 0;
     int nextIdx = 0;
 
-    //    sprintf(c_MsgNr, "%*s", 2, MsgCmd + 1);
     c_MsgCmd = data.substring(1, 4);
     c_MsgCmd[0] = toupper((unsigned char)c_MsgCmd[0]);
     debugOutput("Expected Cmd: <" + String(MsgCmd) + ">", 6);
@@ -466,9 +442,9 @@ bool BMparseData(const String data, const char* MsgCmd)
             break;
         default:
             batteryData.bmType = 0; // no supported BM type could be determined
-            debugOutput("Supported BM device type could not be determined. Reported type is: " + String(batteryData.bmType), 7);
+            debugOutput("Supported BM device type could not be determined. Reported type is: " + String(batteryData.bmType), 2);
         }
-        debugOutput("BM device type: " + String(batteryData.bmType), 7);
+        debugOutput("BM device type: " + String(batteryData.bmType), 5);
     }
 
     switch (batteryData.bmType) {
