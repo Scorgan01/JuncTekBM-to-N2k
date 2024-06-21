@@ -92,7 +92,7 @@ typedef struct {
         batteryType;
 } batteryData_t;
 
-// battery data store and static battery data initialization -> adjust
+// battery data store and static battery data initialization -> adjust to your needs
 batteryData_t batteryData = { .stateOfHealth = 1, .instance = 0x02, .batteryType = N2kDCt_Battery };
 String BMDataSentence; // raw string of BM measured values
 
@@ -101,12 +101,11 @@ Preferences preferences; // Nonvolatile storage on ESP32 - to store LastDeviceAd
 const unsigned long TransmitMessages[] PROGMEM = { 127506UL, // DC detailed status
     127508UL, // battery status
     0 };
-
-unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
-
 bool IsTimeToUpdate(unsigned long NextUpdate);
 unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
+
+unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
 
 // Set webserver object and Port for the OTA webserver
 WebServer otaServer(WEBSERVER_PORT);
