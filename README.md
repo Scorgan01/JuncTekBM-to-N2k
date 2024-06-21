@@ -37,7 +37,7 @@ Password: 12345678<br>
 IP address: 192.168.21.1<br>
 Device name: batteryesp32.local<br>
 URL: http://batteryesp32.local<br>
-Default login credentials: admin/admin<br>
+Default login credentials: admin/esp32<br>
 You can change the WiFi parameters in <wifisecrets.h> and IP parameters in <otaupdate.h>.<br>
 The device will shutdown the WiFi AP after 5 minutes in order not to run the WiFi unnecessarily. Restart the device, if you missed to update the device within that timeframe.<br>
 Be careful: There is no validation of the firmware file. You need to know what you are doing.
