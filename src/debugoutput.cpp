@@ -13,7 +13,7 @@ void debugOutput(String text, int logLevel, bool setupLog)
         codeSegment = "loop";
     }
 
-    if (MIN_LOG_LEVEL >= logLevel) {
+    if (MIN_LOG_LEVEL >= logLevel && Serial) {
         Serial.println("[" + codeSegment + "] [" + LOG_LEVEL_NAMES[logLevel] + "] " + text);
     }
 }
