@@ -103,13 +103,7 @@ const unsigned long TransmitMessages[] PROGMEM = {
     127508L, // battery status
     0
 };
-
 tN2kSyncScheduler DCBatStatusScheduler(false, 1500, 500);
-tN2kSyncScheduler DCStatusScheduler(false, 1500, 510);
-
-bool IsTimeToUpdate(unsigned long NextUpdate);
-unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
-void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
 
 unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
 
@@ -130,16 +124,9 @@ void setup()
     Serial.begin(115200); // Activate debugging via serial monitor
     delay(100);
 #endif
-
     debugOutput("Starting Programm...", 6, true);
 
-    // Disable bluetooth since we don't need it
-    btStop();
-
-    // Reduce CPU frequency to save power
-    // debugOutput("CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
-    // setCpuFrequencyMhz(80);
-    // debugOutput("New CPU Freq: " + String(getCpuFrequencyMhz()), 6, true);
+    btStop(); // Disable bluetooth since we don't need it
 
     SerRS485.begin(115200, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN); // Initialize RS485 communication
     delay(100);
@@ -166,11 +153,6 @@ void setup()
         debugOutput("Error retreiving total battery capacity", 2, true);
     }
 
-    // Reserve enough buffer for sending all messages. This does not work on small memory devices like Uno or Mega
-    NMEA2000.SetN2kCANMsgBufSize(8);
-    NMEA2000.SetN2kCANReceiveFrameBufSize(150);
-    NMEA2000.SetN2kCANSendFrameBufSize(150);
-
     // generate unique id for N2k device information
     esp_efuse_mac_get_default(chipid);
     for (i = 0; i < 6; i++)
@@ -186,8 +168,6 @@ void setup()
         0xffff, // N2k version - unset
         0xff // certification level - unset
     );
-
-    // Set device information
     NMEA2000.SetDeviceInformation(
         id, // Unique number. Use e.g. Serial number.
         170, // Device function=Battery:reports battery status. See codes on http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
@@ -201,12 +181,15 @@ void setup()
     // NMEA2000.SetForwardOwnMessages();
 
     preferences.begin("nvs", false); // Open nonvolatile storage (nvs)
-    NodeAddress = preferences.getInt("LastNodeAddress", 30); // Read stored last NodeAddress, default 30
+    NodeAddress = preferences.getInt("LastNodeAddress", 37); // Read stored last NodeAddress, default 37
     preferences.end();
     debugOutput("N2k node address = " + String(NodeAddress), 4, true);
 
     NMEA2000.SetMode(tNMEA2000::N2km_NodeOnly, NodeAddress); // Set to N2km_ListenAndNode, if you want to see all traffic on bus
     NMEA2000.ExtendTransmitMessages(TransmitMessages);
+    NMEA2000.SetN2kCANMsgBufSize(10); // Buffer for all messages. Buffer size does not work on small memory devices like Uno or Mega
+    //    NMEA2000.SetN2kCANReceiveFrameBufSize(200);
+    NMEA2000.SetN2kCANSendFrameBufSize(150); // Smaller frame buffer size leads to message drops
     NMEA2000.SetOnOpen(OnN2kOpen);
 
     if (NMEA2000.Open()) {
@@ -603,39 +586,35 @@ int BMcalcChecksum(const int param1, const int param2, const int param3)
 
 void SendN2kBatteryState(void)
 {
-    static unsigned long SlowDataUpdated = InitNextUpdate(SlowDataUpdatePeriod, TempSendOffset);
+    //    static unsigned long SlowDataUpdated = InitNextUpdate(SlowDataUpdatePeriod, TempSendOffset);
     tN2kMsg N2kMsg;
 
-    if (IsTimeToUpdate(SlowDataUpdated)) {
-        SetNextUpdate(SlowDataUpdated, SlowDataUpdatePeriod);
+    unsigned char battInstance = batteryData.instance;
+    double battVoltage = double(batteryData.voltage);
+    double battCurrent = double(batteryData.current);
+    double battTemperature = CToKelvin(double(batteryData.temperature));
+    tN2kDCType battType = batteryData.batteryType;
+    unsigned char battSOC = (unsigned char)(batteryData.stateOfCharge);
+    unsigned char battSOH = (unsigned char)(batteryData.stateOfHealth);
+    double battTimeLeft = double(batteryData.batteryTimeLeft * 60); // remaining battery time is expected to be in seconds for N2k PGN 127506
+    double battTotalCap = AhToCoulomb(double(batteryData.totalCapacity));
 
-        unsigned char battInstance = batteryData.instance;
-        double battVoltage = double(batteryData.voltage);
-        double battCurrent = double(batteryData.current);
-        double battTemperature = CToKelvin(double(batteryData.temperature));
-        tN2kDCType battType = batteryData.batteryType;
-        unsigned char battSOC = (unsigned char)(batteryData.stateOfCharge);
-        unsigned char battSOH = (unsigned char)(batteryData.stateOfHealth);
-        double battTimeLeft = double(batteryData.batteryTimeLeft * 60); // remaining battery time is expected to be in seconds for N2k PGN 127506
-        double battTotalCap = AhToCoulomb(double(batteryData.totalCapacity));
+    // void SetN2kPGN127506(tN2kMsg &N2kMsg, unsigned char SID, unsigned char DCInstance, tN2kDCType DCType,
+    //                      unsigned char StateOfCharge, unsigned char StateOfHealth, double TimeRemaining, double RippleVoltage = N2kDoubleNA, double Capacity = N2kDoubleNA)
+    // <TimeRemaining> is in seconds
+    SetN2kPGN127506(N2kMsg, 0xff, battInstance, battType, battSOC, battSOH, battTimeLeft, 0, battTotalCap);
+    NMEA2000.SendMsg(N2kMsg);
+    delay(10);
 
-        // void SetN2kPGN127506(tN2kMsg &N2kMsg, unsigned char SID, unsigned char DCInstance, tN2kDCType DCType,
-        //                      unsigned char StateOfCharge, unsigned char StateOfHealth, double TimeRemaining, double RippleVoltage = N2kDoubleNA, double Capacity = N2kDoubleNA)
-        // <TimeRemaining> is in seconds
-        SetN2kPGN127506(N2kMsg, 0xff, battInstance, battType, battSOC, battSOH, battTimeLeft, 0, battTotalCap);
-        NMEA2000.SendMsg(N2kMsg);
-        delay(10);
+    // void SetN2kPGN127508(tN2kMsg &N2kMsg, unsigned char BatteryInstance, double BatteryVoltage, double BatteryCurrent = N2kDoubleNA,
+    //                      double BatteryTemperature = N2kDoubleNA, unsigned char SID = 0xff)
+    SetN2kPGN127508(N2kMsg, battInstance, battVoltage, battCurrent, battTemperature, 0xff);
 
-        // void SetN2kPGN127508(tN2kMsg &N2kMsg, unsigned char BatteryInstance, double BatteryVoltage, double BatteryCurrent = N2kDoubleNA,
-        //                      double BatteryTemperature = N2kDoubleNA, unsigned char SID = 0xff)
-        SetN2kPGN127508(N2kMsg, battInstance, battVoltage, battCurrent, battTemperature, 0xff);
-
-        if (NMEA2000.SendMsg(N2kMsg)) {
-            debugOutput("Sent next N2k message set.", 5);
-        } else {
-            debugOutput("Error sending N2k message set.", 5);
-        };
-    }
+    if (NMEA2000.SendMsg(N2kMsg)) {
+        debugOutput("Sent next N2k message set.", 5);
+    } else {
+        debugOutput("Error sending N2k message set.", 5);
+    };
 }
 
 // Call back for NMEA2000 open. This will be called, when library starts bus communication.
@@ -644,21 +623,4 @@ void OnN2kOpen()
 {
     // Start schedulers now.
     DCBatStatusScheduler.UpdateNextTime();
-    DCStatusScheduler.UpdateNextTime();
-}
-
-bool IsTimeToUpdate(unsigned long NextUpdate)
-{
-    return (NextUpdate < millis());
-}
-
-unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset = 0)
-{
-    return millis() + Period + Offset;
-}
-
-void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period)
-{
-    while (NextUpdate < millis())
-        NextUpdate += Period;
 }
