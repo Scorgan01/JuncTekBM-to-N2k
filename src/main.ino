@@ -21,19 +21,19 @@
    OTA web update leverages the example from ArduinoOTA Library and work from Rui Santos for adjustments to work with WiFi AP: http://randomnerdtutorials.com
    OTA web page design was inspired by: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/ */
 
-#define DEBUG // Flag to activate logging to serial console (i.e. serial monitor in arduino ide)
-// #define TEST // uncomment to provide test data sentences if no device is connected
+#define DEBUG // Flag to activate logging to serial console
+#define TEST // uncomment to provide test data sentences if no battery monitor device is connected
 
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
 #define ESP32_CAN_RX_PIN GPIO_NUM_19 // set CAN RX port to 19
 #define RS485_RX_PIN GPIO_NUM_32 // define the RS485 RX port
 #define RS485_TX_PIN GPIO_NUM_26 // define the RS485 TX port
-#define USE_N2K_CAN 7 // #define for NMEA2000_CAN library to ensure use with ESP32
+#define USE_N2K_CAN 7 // for NMEA2000_CAN library to ensure use with ESP32
 
 #include <Arduino.h>
 #include <N2kMessages.h>
-#include <NMEA2000_CAN.h> // This will automatically choose right CAN library and create suitable NMEA2000 object
+#include <NMEA2000_CAN.h> // This will automatically choose correct CAN library and create suitable NMEA2000 object
 #include <Preferences.h>
 
 #include "debugoutput.h" // standardized debug messages to Serial
@@ -52,8 +52,8 @@ const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
 #define SlowDataUpdatePeriod 1000 // Time between CAN Messages sent
 #define N2K_LOAD_LEVEL 1 // Device power load on N2k bus in multiples of 50mA
 
-#define BMTYPE_READ_TIMEOUT 30 // time limit for getting battery monitor type in seconds
-#define WIFI_AP_TIMEOUT 300 // time limit for WiFi AP shutdown in seconds
+#define BMTYPE_READ_TIMEOUT 30 // time limit in seconds for getting battery monitor type
+#define WIFI_AP_TIMEOUT 300 // time limit in seconds for WiFi AP shutdown
 
 HardwareSerial SerRS485(2);
 
@@ -68,7 +68,7 @@ typedef struct {
         stateOfCharge,
         stateOfHealth;
     long
-        operationRecVal,
+        dataRecNo,
         temperature,
         reserved,
         date,
@@ -98,9 +98,11 @@ String BMDataSentence; // raw string of BM measured values
 
 int NodeAddress; // To store last N2k device node address
 Preferences preferences; // Nonvolatile storage on ESP32 - to store LastDeviceAddress
-const unsigned long TransmitMessages[] PROGMEM = { 127506UL, // DC detailed status
+const unsigned long TransmitMessages[] PROGMEM = {
+    127506UL, // DC detailed status
     127508UL, // battery status
-    0 };
+    0
+};
 bool IsTimeToUpdate(unsigned long NextUpdate);
 unsigned long InitNextUpdate(unsigned long Period, unsigned long Offset);
 void SetNextUpdate(unsigned long& NextUpdate, unsigned long Period);
@@ -110,7 +112,6 @@ unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM
 // Set webserver object and Port for the OTA webserver
 WebServer otaServer(WEBSERVER_PORT);
 bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
-
 
 //-------------------------------------------------------------------------------------
 //   setup
@@ -171,15 +172,18 @@ void setup()
     NMEA2000.SetN2kCANSendFrameBufSize(250);
 
     // Set Product information
-    NMEA2000.SetProductInformation("A9529AFB16", // Manufacturer's Model serial code; here, M5Stack Atom Lite
-        6001, // Manufacturer's product code
+    NMEA2000.SetProductInformation(
+        "A9529AFB16", // Manufacturer's Model serial code; here, M5Stack Atom Lite
+        601, // Manufacturer's product code
         "BM Monitor", // Manufacturer's Model ID
         "1.0.0.0", // Manufacturer's Software version code
         "1.0.0.0", // Manufacturer's Model version
         N2K_LOAD_LEVEL, // Device power load on N2k bus
-        0xffff, 0x01);
+        0xffff,
+        0x01);
     // Set device information
-    NMEA2000.SetDeviceInformation(id, // Unique number. Use e.g. Serial number.
+    NMEA2000.SetDeviceInformation(
+        id, // Unique number. Use e.g. Serial number.
         170, // Device function=Battery:reports battery status. See codes on http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
         35, // Device class=Electrical generation. See codes on  http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
         6702 // Just choosen free from code list on http://www.nmea.org/Assets/20121020%20nmea%202000%20registration%20list.pdf
@@ -285,7 +289,7 @@ bool BMGetBatteryMonitorType(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r00=1,206,2110,132,3,\r\n"; // test data -> no device needs to be connected
+    BMDataSentence = ":r00=1,4,4110,139,89,\r\n"; // test data -> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
@@ -304,7 +308,7 @@ bool BMGetBatterySettings(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r51=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
+    BMDataSentence = ":r51=1,223,0,1000,0,0,0,255,0,0,1100,100,100,96,0,0,1,100,0,1260,1000,20,20,255,0,0,0,15,\r\n"; // test data -> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
@@ -323,7 +327,7 @@ bool BMGetBatteryState(const int BMaddress)
     BMDataSentence = BMreadMsg();
 
 #ifdef TEST
-    BMDataSentence = ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
+    BMDataSentence = ":r50=1,71,1260,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"; // test data -> no device needs to be connected
 #endif
 
     debugOutput("Message: " + BMDataSentence, 5);
@@ -454,7 +458,7 @@ bool BMparseData(const String data, const char* MsgCmd)
         BMassignDataKHF(c_MsgCmd, dataSet);
         break;
     default:
-        return false; // should never get here
+        return false; // no known BM type
     }
 
     return true;
@@ -464,7 +468,7 @@ void BMassignDataKLF(String c_MsgCmd, long* dataSet)
 {
     // KL-F data format:
     // * Base Info - :r00=<addr>,<checksum>,<model>,<sw_version>,<ser_no>
-    // * Measures -  :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<consumed_amph>,<charged_kWh>,<runtime>,<temp>,<reserved>,<output_state>,
+    // * Measures -  :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<consumed_Ah>,<charged_kWh>,<runtime>,<temp>,<reserved>,<output_state>,
     //                    <current_direction>,<remaining_time>,<int_resistance>
     // * State -     :r51=<addr>,<checksum>,<overvolt_prot>,<undervolt_prot>,<overdischrg_prot>,<overchrg_prot>,<overpwr_prot>,<overtmp_prot>,<prot_rcvr_time>,
     //                    <prot_delay_time>,<batt_cap>,<volt_clbr>,<curr_clbr>,<temp_clbr>,<undef_func>,<relay_type>,<curr_mltplr>,<volt_crv_scale>,<amp_crv_scale>
@@ -489,9 +493,9 @@ void BMassignDataKLF(String c_MsgCmd, long* dataSet)
         debugOutput("Checksum: " + String(batteryData.checksum), 5);
         debugOutput("Voltage: " + String(batteryData.voltage) + " V", 5);
         debugOutput("Current: " + String(batteryData.current) + " A", 5);
-        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " kWh", 5);
+        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " Ah", 5);
         debugOutput("Discharged Ah: " + String(batteryData.dischargedAh) + " Ah", 5);
-        debugOutput("Charged kWh: " + String(batteryData.chargedKWh) + " kWh", 5);
+        debugOutput("Charged energy: " + String(batteryData.chargedKWh) + " kWh", 5);
         debugOutput("Battery runtime: " + String(batteryData.battRuntime), 5);
         debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 5);
         debugOutput("Reserved: " + String(batteryData.reserved), 5);
@@ -512,11 +516,12 @@ void BMassignDataKHF(String c_MsgCmd, long* dataSet)
 {
     // KH-F data format:
     // * Base Info - :r00=<addr>,<checksum>,<model>,<sw_version>,<ser_no>
-    // * Measures -  :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<discharged_kWh>,<charged_kWh>,<op_record_val>,
+    // * Measures -  :r50=<addr>,<checksum>,<voltage>,<current_amps>,<remaining_batt_cap>,<discharged_kWh>,<charged_kWh>,<data_record_no>,
     //                    <temp>,<reserved>,<output_state>,<current_direction>,<remaining_time>,<time_adj>,<date>,<time>
     // * State -     :r51=<addr>,<checksum>,<overvolt_prot>,<undervolt_prot>,<overdischrg_prot>,<overchrg_prot>,<overpwr_prot>,<overtmp_prot>,<prot_rcvr_time>,
     //                    <prot_delay_time>,<batt_cap>,<volt_clbr>,<curr_clbr>,<temp_clbr>,<undef_func>,<relay_type>,<curr_mltplr>,<time_clbr>,<logging>,
     //                    <full_chrg_volt>,<low_batt_volt>,<full_chrg_curr>,<monitor_time>,<low_temp_prot>,<temp_unit>,<bluet_pwd>,datalog_interval>
+    // Example -     ":r50=1,36,5050,510,1174,8325,8207,7922,122,0,99,1,44,100,101,0,\r\n"
 
     if (c_MsgCmd == BM_RMSR_CMD) { // data sentence contains battery measure values
 
@@ -526,7 +531,7 @@ void BMassignDataKHF(String c_MsgCmd, long* dataSet)
         batteryData.remainingCapacity = float(dataSet[3]) / 1000; // decimals are delivering 3 digits of precision; any output is limited to 2 digits of precision, though
         batteryData.dischargedKWh = float(dataSet[4]) / 1000;
         batteryData.chargedKWh = float(dataSet[5]) / 1000;
-        batteryData.operationRecVal = long(dataSet[6]);
+        batteryData.dataRecNo = long(dataSet[6]);
         batteryData.temperature = long(dataSet[7] - 100);
         batteryData.reserved = long(dataSet[8]);
         batteryData.outputState = int(dataSet[9]);
@@ -540,10 +545,10 @@ void BMassignDataKHF(String c_MsgCmd, long* dataSet)
         debugOutput("Checksum: " + String(batteryData.checksum), 5);
         debugOutput("Voltage: " + String(batteryData.voltage) + " V", 5);
         debugOutput("Current: " + String(batteryData.current) + " A", 5);
-        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " kWh", 5);
-        debugOutput("Discharged kWh: " + String(batteryData.dischargedKWh) + " kWh", 5);
-        debugOutput("Charged kWh: " + String(batteryData.chargedKWh) + " kWh", 5);
-        debugOutput("Oper value: " + String(batteryData.operationRecVal), 5);
+        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " Ah", 5);
+        debugOutput("Discharged energy: " + String(batteryData.dischargedKWh) + " kWh", 5);
+        debugOutput("Charged energy: " + String(batteryData.chargedKWh) + " kWh", 5);
+        debugOutput("Data record no.: " + String(batteryData.dataRecNo), 5);
         debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 5);
         debugOutput("Reserved: " + String(batteryData.reserved), 5);
         debugOutput("Output state: " + String(batteryData.outputState), 5);
@@ -557,7 +562,7 @@ void BMassignDataKHF(String c_MsgCmd, long* dataSet)
     } else if (c_MsgCmd == BM_RSETT_CMD) { // data sentence contains battery settings values
 
         batteryData.totalCapacity = float(dataSet[9]) / 10;
-        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " kWh", 5);
+        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " Ah", 5);
     }
 }
 
