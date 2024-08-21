@@ -47,9 +47,6 @@ const char BM_RMSR_CMD[] = "R50"; // battery monitor read measures command
 const char BM_RSETT_CMD[] = "R51"; // battery monitor read settings command
 #define BM_TYPE_KLF 2 // battery monitor type is KL-F series
 #define BM_TYPE_KHF 4 // battery monitor type is KH-F series
-
-#define TempSendOffset 0 // variable name to be changed
-#define SlowDataUpdatePeriod 1000 // Time between CAN Messages sent
 #define N2K_LOAD_LEVEL 1 // Device power load on N2k bus in multiples of 50mA
 
 #define BMTYPE_READ_TIMEOUT 30 // time limit in seconds for getting battery monitor type
@@ -108,7 +105,8 @@ tN2kSyncScheduler DCBatStatusScheduler(false, 1500, 500);
 unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
 
 // Set webserver object and Port for the OTA webserver
-WebServer otaServer(WEBSERVER_PORT);
+// WebServer otaServer(WEBSERVER_PORT);
+AsyncWebServer otaServer(WEBSERVER_PORT);
 bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
 
 //-------------------------------------------------------------------------------------
@@ -187,16 +185,17 @@ void setup()
 
     NMEA2000.SetMode(tNMEA2000::N2km_NodeOnly, NodeAddress); // Set to N2km_ListenAndNode, if you want to see all traffic on bus
     NMEA2000.ExtendTransmitMessages(TransmitMessages);
-    NMEA2000.SetN2kCANMsgBufSize(10); // Buffer for all messages. Buffer size does not work on small memory devices like Uno or Mega
-    //    NMEA2000.SetN2kCANReceiveFrameBufSize(200);
-    NMEA2000.SetN2kCANSendFrameBufSize(150); // Smaller frame buffer size leads to message drops
+//    NMEA2000.SetN2kCANMsgBufSize(10); // Buffer for all messages. Buffer size does not work on small memory devices like Uno or Mega
+//    NMEA2000.SetN2kCANSendFrameBufSize(200); // Smaller frame buffer size leads to message drops
     NMEA2000.SetOnOpen(OnN2kOpen);
 
+    delay(5000); // all N2k bus devices start at once; wait for boat bus to be fully initialized before joining
     if (NMEA2000.Open()) {
         debugOutput("Opened N2k stream.", 5, true);
     } else {
         debugOutput("Error opening N2k stream.", 5, true);
     };
+    
 
     // Setup WiFi access point with SSID and password
     OtaWifiAPUP = false;
@@ -230,6 +229,7 @@ void loop()
 
     debugOutput("_____________ Next loop _____________\n", 6);
 
+/*
     // Check for OTA web access
     if (OtaWifiAPUP) {
         loopTime = (millis() - startTime) / 1000;
@@ -246,7 +246,7 @@ void loop()
             }
         };
     }
-
+*/
     if (DCBatStatusScheduler.IsTime()) {
         if (BMGetBatteryState(BM_ADDRESS)) {
             SendN2kBatteryState();

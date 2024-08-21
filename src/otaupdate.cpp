@@ -3,7 +3,6 @@
 
 #include "otaupdate.h"
 
-//    int OTAUpdate::startWifi() // Setup WiFi access point with SSID and password
 int otaStartWifi() // Setup WiFi access point with SSID and password
 {
     int errorCode = 0;
@@ -17,8 +16,7 @@ int otaStartWifi() // Setup WiFi access point with SSID and password
 
     debugOutput("Access point: " + String(SECRET_WIFI_SSID), 4, true);
     IPAddress IP = WiFi.softAPIP();
-    debugOutput("AP IP address: ", 4, true);
-    Serial.println(IP);
+    debugOutput("AP IP address: " + IP.toString(), 4, true);
 
     if (!MDNS.begin(WIFI_HOST)) { // use mdns for host name resolution
         errorCode = 2; // error mDNS responder setup
@@ -27,52 +25,52 @@ int otaStartWifi() // Setup WiFi access point with SSID and password
     return errorCode; // 0 = success; 1 = access point not established; 2 = mDNS responder not established
 }
 
-int otaDefineOTAWebServer(WebServer* server) // Define OTA web server with code update function
+//
+// initialize AsyncOTA web server
+// logging mit events ergänzen
+//
+int otaDefineOTAWebServer(AsyncWebServer* server) // Define OTA web server with code update function
 {
-    int errorCode = 0;
-
     String wbPgLogin;
     String wbPgUpdateIndex;
 
     otaDefineOTAWebPages(wbPgLogin, wbPgUpdateIndex);
 
-    // return index page which is stored in wbPgLogin
-    server->on("/", HTTP_GET, [server, wbPgLogin]() {
-        server->sendHeader("Connection", "close");
-        server->send(200, "text/html", wbPgLogin);
-    });
-    server->on("/updateIndex", HTTP_GET, [server, wbPgUpdateIndex]() {
-        server->sendHeader("Connection", "close");
-        server->send(200, "text/html", wbPgUpdateIndex);
+    server->on("/", HTTP_GET, [server, wbPgLogin](AsyncWebServerRequest* request) {
+        //        request->send(200, "text/plain", "OTA Update Server. Navigiere zu /update um die Firmware zu aktualisieren.");
+        request->send(200, "text/html", wbPgLogin);
     });
 
-    // handling uploading firmware file
-    server->on("/update", HTTP_POST, [server]() {
-        server->sendHeader("Connection", "close");
-        server->send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
-            ESP.restart(); }, [server, &errorCode]() {
-        HTTPUpload& upload = server->upload();
-        if (upload.status == UPLOAD_FILE_START) {
-            debugOutput("Update: " + upload.filename, 4);
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { // start with max available size
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_WRITE) {
-            // flashing firmware to ESP
-            debugOutput("File flashing", 6);
-            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_END) {
-            if (Update.end(true)) { // true to set the size to the current progress
-                debugOutput("Update success. Rebooting ..." + String(upload.totalSize), 4);
-            } else {
-                Update.printError(Serial);
-                errorCode = 1; // error updating firmware
-            }
-        } });
+    server->on("/update", HTTP_GET, [server, wbPgUpdateIndex](AsyncWebServerRequest* request) {
+        //        request->send(200, "text/html", "<form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Update'></form>");
+        request->send(200, "text/html", wbPgUpdateIndex);
+    });
 
-    return errorCode; // 0 = success; 1 = error updating firmware
+    server->on("/update", HTTP_POST, [](AsyncWebServerRequest* request) {
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", (Update.hasError())?"FAIL":"OK");
+    response->addHeader("Connection", "close");
+    request->send(response);
+    ESP.restart(); }, [](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+    if (!index){
+      debugOutput("Update start: " + filename, 4);
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        debugOutput("Update error.", 4);
+        Update.printError(Serial);
+      }
+    }
+    if (Update.write(data, len) != len) {
+      debugOutput("Update error.", 4);
+      Update.printError(Serial);
+    }
+    if (final) {
+      if (Update.end(true)) {
+        debugOutput("Update success: " + String(index+len), 4);
+      } else {
+        debugOutput("Update error.", 4);
+        Update.printError(Serial);
+      }
+    } });
+    return 1;
 }
 
 void otaDefineOTAWebPages(String& pg_login, String& pg_update) // Define OTA login page
@@ -92,41 +90,46 @@ void otaDefineOTAWebPages(String& pg_login, String& pg_update) // Define OTA log
                "<script>"
                "function check(form) {"
                "if(form.userid.value=='admin' && form.pwd.value=='esp32')"
-               "{window.open('/updateIndex')}"
+               "{window.open('/update')}"
                "else"
                "{alert('Error Password or Username')}"
                "}"
                "</script>"
         + style;
 
-    pg_update = "<body>"
+    pg_update = "<!DOCTYPE html>"
+                "<html>"
+                "<head>"
+                "<title>BatteryESP32 OTA Update</title>"
+                "</head>"
+                "<body>"
                 "<form method='POST' action='#' enctype='multipart/form-data' id='upload-form'>"
                 "<h1>BatteryESP32 OTA Update</h1>"
                 "<input type='file' name='update'>"
-                "<input type='submit' class=btn value='Update'>"
+                "<input type='submit' class='btn' value='Update'>" // added quotes around 'btn'
                 "<div style='width:100%;background-color:#e0e0e0;border-radius:8px;'>"
                 "<div id='prg' style='width:0%;background-color:#2196F3;padding:2px;border-radius:8px;color:white;text-align:center;'>0%</div>"
                 "</div>"
                 "</form>"
-                "</body>"
                 "<script>"
                 "var prg = document.getElementById('prg');"
                 "var form = document.getElementById('upload-form');"
-                "form.addEventListener('submit', e=>{"
+                "form.addEventListener('submit', function(e){"
                 "e.preventDefault();"
                 "var data = new FormData(form);"
                 "var req = new XMLHttpRequest();"
                 "req.open('POST', '/update');"
-                "req.upload.addEventListener('progress', p=>{"
-                "let w = Math.round((p.loaded / p.total)*100) + '%';"
+                "req.upload.addEventListener('progress', function(p){"
                 "if(p.lengthComputable){"
+                "let w = Math.round((p.loaded / p.total) * 100) + '%';"
                 "prg.innerHTML = w;"
                 "prg.style.width = w;"
+                "if(w === '100%') prg.style.backgroundColor = '#04AA6D';"
                 "}"
-                "if(w == '100%') prg.style.backgroundColor = '#04AA6D';"
                 "});"
                 "req.send(data);"
                 "});"
                 "</script>"
-        + style;
+        + style + "</body>"
+                  "</html>";
 }
