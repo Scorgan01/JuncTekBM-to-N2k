@@ -105,8 +105,7 @@ tN2kSyncScheduler DCBatStatusScheduler(false, 1500, 500);
 unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
 
 // Set webserver object and Port for the OTA webserver
-// WebServer otaServer(WEBSERVER_PORT);
-AsyncWebServer otaServer(WEBSERVER_PORT);
+// AsyncWebServer otaServer(WEBSERVER_PORT);
 bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
 
 //-------------------------------------------------------------------------------------
@@ -122,12 +121,41 @@ void setup()
     Serial.begin(115200); // Activate debugging via serial monitor
     delay(100);
 #endif
-    debugOutput("Starting Programm...", 6, true);
+    debugOutput("Starting Programm...", 4, true);
 
     btStop(); // Disable bluetooth since we don't need it
 
     SerRS485.begin(115200, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN); // Initialize RS485 communication
     delay(100);
+
+    // Setup WiFi access point with SSID and password
+    OtaWifiAPUP = false;
+    debugOutput("Setting WiFi access point ...", 4, true);
+    switch (otaStartWifi()) {
+    case 0:
+        debugOutput("Established WiFi access point", 4, true);
+        debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
+        OtaWifiAPUP = true;
+        break;
+    case 1:
+        debugOutput("Error setting up WiFi access point", 2, true);
+        break;
+    case 2:
+        debugOutput("Error setting up mDNS responder.", 2, true);
+    }
+
+    // WebSocket event for message logging
+    myLogWebSocket.onEvent(onWsEvent);
+    myWebServer.addHandler(&myLogWebSocket);
+
+    //    otaDefineOTAWebServer(&otaServer);
+    otaDefineOTAWebSite();
+    myWebServer.begin();
+
+    // set timeout and start time for OTA update time limit
+    timeout = WIFI_AP_TIMEOUT; // time limit for WiFi AP shutdown in seconds
+    startTime = millis();
+
 
     // Identify battery monitor type
     timeout = BMTYPE_READ_TIMEOUT; // time limit for getting battery monitor type in seconds
@@ -181,43 +209,20 @@ void setup()
     preferences.begin("nvs", false); // Open nonvolatile storage (nvs)
     NodeAddress = preferences.getInt("LastNodeAddress", 37); // Read stored last NodeAddress, default 37
     preferences.end();
-    debugOutput("N2k node address = " + String(NodeAddress), 4, true);
 
     NMEA2000.SetMode(tNMEA2000::N2km_NodeOnly, NodeAddress); // Set to N2km_ListenAndNode, if you want to see all traffic on bus
     NMEA2000.ExtendTransmitMessages(TransmitMessages);
-//    NMEA2000.SetN2kCANMsgBufSize(10); // Buffer for all messages. Buffer size does not work on small memory devices like Uno or Mega
-//    NMEA2000.SetN2kCANSendFrameBufSize(200); // Smaller frame buffer size leads to message drops
+    //    NMEA2000.SetN2kCANMsgBufSize(10); // Buffer for all messages. Buffer size does not work on small memory devices like Uno or Mega
+    //    NMEA2000.SetN2kCANSendFrameBufSize(200); // Smaller frame buffer size leads to message drops
     NMEA2000.SetOnOpen(OnN2kOpen);
 
     delay(5000); // all N2k bus devices start at once; wait for boat bus to be fully initialized before joining
+    debugOutput("N2k node address = " + String(NodeAddress), 4, true);
     if (NMEA2000.Open()) {
-        debugOutput("Opened N2k stream.", 5, true);
+        debugOutput("Opened N2k stream.", 4, true);
     } else {
-        debugOutput("Error opening N2k stream.", 5, true);
+        debugOutput("Error opening N2k stream.", 2, true);
     };
-    
-
-    // Setup WiFi access point with SSID and password
-    OtaWifiAPUP = false;
-    debugOutput("Setting WiFi access point ...", 6, true);
-    switch (otaStartWifi()) {
-    case 0:
-        debugOutput("Established WiFi access point", 4, true);
-        debugOutput("mDNS responder started. Hostname: " + String(WIFI_HOST), 4, true);
-        OtaWifiAPUP = true;
-        break;
-    case 1:
-        debugOutput("Error setting up WiFi access point", 2, true);
-        break;
-    case 2:
-        debugOutput("Error setting up mDNS responder.", 2, true);
-    }
-    otaDefineOTAWebServer(&otaServer);
-    otaServer.begin();
-
-    // set timeout and start time for OTA update time limit
-    timeout = WIFI_AP_TIMEOUT; // time limit for WiFi AP shutdown in seconds
-    startTime = millis();
 }
 
 //-------------------------------------------------------------------------------------
@@ -229,24 +234,24 @@ void loop()
 
     debugOutput("_____________ Next loop _____________\n", 6);
 
-/*
-    // Check for OTA web access
-    if (OtaWifiAPUP) {
-        loopTime = (millis() - startTime) / 1000;
-        if (loopTime < timeout) {
-            otaServer.handleClient();
-        } else {
-            // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
-            otaServer.stop();
-            if (WiFi.mode(WIFI_OFF)) {
-                debugOutput("\nShutdown OTA WiFi access point. No firmware update occured.", 4);
-                OtaWifiAPUP = false;
+    /*
+        // Check for OTA web access
+        if (OtaWifiAPUP) {
+            loopTime = (millis() - startTime) / 1000;
+            if (loopTime < timeout) {
+                otaServer.handleClient();
             } else {
-                debugOutput("Shutdown OTA WiFi access point failed.", 3);
-            }
-        };
-    }
-*/
+                // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
+                otaServer.stop();
+                if (WiFi.mode(WIFI_OFF)) {
+                    debugOutput("\nShutdown OTA WiFi access point. No firmware update occured.", 4);
+                    OtaWifiAPUP = false;
+                } else {
+                    debugOutput("Shutdown OTA WiFi access point failed.", 3);
+                }
+            };
+        }
+    */
     if (DCBatStatusScheduler.IsTime()) {
         if (BMGetBatteryState(BM_ADDRESS)) {
             SendN2kBatteryState();
@@ -263,10 +268,11 @@ void loop()
         preferences.begin("nvs", false);
         preferences.putInt("LastNodeAddress", SourceAddress);
         preferences.end();
-        debugOutput("Address change. New address = " + String(SourceAddress), 1);
+        debugOutput("Address change. New address = " + String(SourceAddress), 4);
     }
 
-    //    delay(1000);
+    // web socket processing
+    myLogWebSocket.cleanupClients();
 }
 
 bool BMGetBatteryMonitorType(const int BMaddress)
@@ -476,25 +482,25 @@ void BMassignDataKLF(String c_MsgCmd, long* dataSet)
         batteryData.intResist = float(dataSet[12]) / 100;
         batteryData.stateOfCharge = int(batteryData.remainingCapacity / batteryData.totalCapacity * 100);
 
-        debugOutput("Checksum: " + String(batteryData.checksum), 5);
-        debugOutput("Voltage: " + String(batteryData.voltage) + " V", 5);
-        debugOutput("Current: " + String(batteryData.current) + " A", 5);
-        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " Ah", 5);
-        debugOutput("Discharged Ah: " + String(batteryData.dischargedAh) + " Ah", 5);
-        debugOutput("Charged energy: " + String(batteryData.chargedKWh) + " kWh", 5);
-        debugOutput("Battery runtime: " + String(batteryData.battRuntime), 5);
-        debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 5);
-        debugOutput("Reserved: " + String(batteryData.reserved), 5);
-        debugOutput("Output state: " + String(batteryData.outputState), 5);
-        debugOutput("Current direction: " + String(batteryData.currentDir), 5);
-        debugOutput("Remaining batt time: " + String(batteryData.batteryTimeLeft) + " min.", 5);
-        debugOutput("Battery internal resistance: " + String(batteryData.intResist) + " mOhm", 5);
-        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %" + "\n", 5);
+        debugOutput("Checksum: " + String(batteryData.checksum), 6);
+        debugOutput("Voltage: " + String(batteryData.voltage) + " V", 6);
+        debugOutput("Current: " + String(batteryData.current) + " A", 6);
+        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " Ah", 6);
+        debugOutput("Discharged Ah: " + String(batteryData.dischargedAh) + " Ah", 6);
+        debugOutput("Charged energy: " + String(batteryData.chargedKWh) + " kWh", 6);
+        debugOutput("Battery runtime: " + String(batteryData.battRuntime), 6);
+        debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 6);
+        debugOutput("Reserved: " + String(batteryData.reserved), 6);
+        debugOutput("Output state: " + String(batteryData.outputState), 6);
+        debugOutput("Current direction: " + String(batteryData.currentDir), 6);
+        debugOutput("Remaining batt time: " + String(batteryData.batteryTimeLeft) + " min.", 6);
+        debugOutput("Battery internal resistance: " + String(batteryData.intResist) + " mOhm", 6);
+        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %" + "\n", 6);
 
     } else if (c_MsgCmd == BM_RSETT_CMD) { // data sentence contains battery settings values
 
         batteryData.totalCapacity = float(dataSet[9]) / 10;
-        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " kWh", 5);
+        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " kWh", 6);
     }
 }
 
@@ -528,27 +534,27 @@ void BMassignDataKHF(String c_MsgCmd, long* dataSet)
         batteryData.lastReadTime = long(dataSet[14]);
         batteryData.stateOfCharge = int(batteryData.remainingCapacity / batteryData.totalCapacity * 100);
 
-        debugOutput("Checksum: " + String(batteryData.checksum), 5);
-        debugOutput("Voltage: " + String(batteryData.voltage) + " V", 5);
-        debugOutput("Current: " + String(batteryData.current) + " A", 5);
-        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " Ah", 5);
-        debugOutput("Discharged energy: " + String(batteryData.dischargedKWh) + " kWh", 5);
-        debugOutput("Charged energy: " + String(batteryData.chargedKWh) + " kWh", 5);
-        debugOutput("Data record no.: " + String(batteryData.dataRecNo), 5);
-        debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 5);
-        debugOutput("Reserved: " + String(batteryData.reserved), 5);
-        debugOutput("Output state: " + String(batteryData.outputState), 5);
-        debugOutput("Current direction: " + String(batteryData.currentDir), 5);
-        debugOutput("Remaining batt time: " + String(batteryData.batteryTimeLeft) + " min.", 5);
-        debugOutput("Time adjust: " + String(batteryData.timeAdjust), 5);
-        debugOutput("Date: " + String(batteryData.date), 5);
-        debugOutput("Time: " + String(batteryData.lastReadTime), 5);
-        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %" + "\n", 5);
+        debugOutput("Checksum: " + String(batteryData.checksum), 6);
+        debugOutput("Voltage: " + String(batteryData.voltage) + " V", 6);
+        debugOutput("Current: " + String(batteryData.current) + " A", 6);
+        debugOutput("Remaining capacity: " + String(batteryData.remainingCapacity) + " Ah", 6);
+        debugOutput("Discharged energy: " + String(batteryData.dischargedKWh) + " kWh", 6);
+        debugOutput("Charged energy: " + String(batteryData.chargedKWh) + " kWh", 6);
+        debugOutput("Data record no.: " + String(batteryData.dataRecNo), 6);
+        debugOutput("Temperature: " + String(batteryData.temperature) + " °C", 6);
+        debugOutput("Reserved: " + String(batteryData.reserved), 6);
+        debugOutput("Output state: " + String(batteryData.outputState), 6);
+        debugOutput("Current direction: " + String(batteryData.currentDir), 6);
+        debugOutput("Remaining batt time: " + String(batteryData.batteryTimeLeft) + " min.", 6);
+        debugOutput("Time adjust: " + String(batteryData.timeAdjust), 6);
+        debugOutput("Date: " + String(batteryData.date), 6);
+        debugOutput("Time: " + String(batteryData.lastReadTime), 6);
+        debugOutput("State of charge SOC: " + String(batteryData.stateOfCharge) + " %" + "\n", 6);
 
     } else if (c_MsgCmd == BM_RSETT_CMD) { // data sentence contains battery settings values
 
         batteryData.totalCapacity = float(dataSet[9]) / 10;
-        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " Ah", 5);
+        debugOutput("Total capacity: " + String(batteryData.totalCapacity) + " Ah", 6);
     }
 }
 
@@ -567,8 +573,8 @@ bool BMchkChecksum(long param[], int noOfParam)
     }
     chkSum = (chkSum % 255) + 1;
 
-    debugOutput("Checksum read: " + String(checkSumRead), 5);
-    debugOutput("Checksum calculated: " + String(chkSum), 5);
+    debugOutput("Checksum read: " + String(checkSumRead), 6);
+    debugOutput("Checksum calculated: " + String(chkSum), 6);
     return checkSumRead == chkSum;
 }
 
@@ -613,7 +619,7 @@ void SendN2kBatteryState(void)
     if (NMEA2000.SendMsg(N2kMsg)) {
         debugOutput("Sent next N2k message set.", 5);
     } else {
-        debugOutput("Error sending N2k message set.", 5);
+        debugOutput("Error sending N2k message set.", 3);
     };
 }
 

@@ -7,7 +7,7 @@
 #include <Arduino.h>
 #include <WString.h>
 
-const int MIN_LOG_LEVEL = 5; // specify minimum log level
+const int MIN_LOG_LEVEL = 4; // specify minimum log level
 const String LOG_LEVEL_NAMES[] = { "OFF", "FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "ALL" };
 extern HardwareSerial Serial;
 

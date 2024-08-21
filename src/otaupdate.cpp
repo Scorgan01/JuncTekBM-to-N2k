@@ -3,6 +3,9 @@
 
 #include "otaupdate.h"
 
+AsyncWebServer myWebServer(WEBSERVER_PORT);
+AsyncWebSocket myLogWebSocket("/log");
+
 int otaStartWifi() // Setup WiFi access point with SSID and password
 {
     int errorCode = 0;
@@ -25,28 +28,34 @@ int otaStartWifi() // Setup WiFi access point with SSID and password
     return errorCode; // 0 = success; 1 = access point not established; 2 = mDNS responder not established
 }
 
-//
-// initialize AsyncOTA web server
-// logging mit events ergänzen
-//
-int otaDefineOTAWebServer(AsyncWebServer* server) // Define OTA web server with code update function
+
+// Web socket event handler
+void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
+    if(type == WS_EVT_CONNECT) {
+        debugOutput("Web client connected.", 6);
+        client->text("Welcome to batteryESP32 Web log!");
+    } else if(type == WS_EVT_DISCONNECT) {
+        debugOutput("Web client disconnected.", 6);
+    }
+}
+
+
+void otaDefineOTAWebSite() // Define OTA web pages with code update function
 {
     String wbPgLogin;
     String wbPgUpdateIndex;
 
     otaDefineOTAWebPages(wbPgLogin, wbPgUpdateIndex);
 
-    server->on("/", HTTP_GET, [server, wbPgLogin](AsyncWebServerRequest* request) {
-        //        request->send(200, "text/plain", "OTA Update Server. Navigiere zu /update um die Firmware zu aktualisieren.");
+    myWebServer.on("/", HTTP_GET, [wbPgLogin](AsyncWebServerRequest* request) {
         request->send(200, "text/html", wbPgLogin);
     });
 
-    server->on("/update", HTTP_GET, [server, wbPgUpdateIndex](AsyncWebServerRequest* request) {
-        //        request->send(200, "text/html", "<form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Update'></form>");
+    myWebServer.on("/update", HTTP_GET, [wbPgUpdateIndex](AsyncWebServerRequest* request) {
         request->send(200, "text/html", wbPgUpdateIndex);
     });
 
-    server->on("/update", HTTP_POST, [](AsyncWebServerRequest* request) {
+    myWebServer.on("/update", HTTP_POST, [](AsyncWebServerRequest* request) {
     AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", (Update.hasError())?"FAIL":"OK");
     response->addHeader("Connection", "close");
     request->send(response);
@@ -70,7 +79,28 @@ int otaDefineOTAWebServer(AsyncWebServer* server) // Define OTA web server with 
         Update.printError(Serial);
       }
     } });
-    return 1;
+
+    myWebServer.on("/log", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "text/html", 
+            "<!DOCTYPE html>"
+            "<html>"
+            "<head>"
+            "<title>ESP32 Log</title>"
+            "<script>"
+            "var socket = new WebSocket('ws://' + window.location.hostname + '/log');"
+            "socket.onmessage = function(event) {"
+            "  var log = document.getElementById('log');"
+            "  log.innerHTML += event.data + '<br>';"
+            "};"
+            "</script>"
+            "</head>"
+            "<body>"
+            "<h1>ESP32 Log</h1>"
+            "<div id='log' style='height:1200px;font-size:10px;overflow:auto;border:1px solid #ccc;'></div>"
+            "</body>"
+            "</html>"
+        );
+    });
 }
 
 void otaDefineOTAWebPages(String& pg_login, String& pg_update) // Define OTA login page

@@ -2,10 +2,12 @@
 // Scorgan - Ulrich Meine
 
 #include "debugoutput.h"
+#include "otaupdate.h"
 
 void debugOutput(String text, int logLevel, bool setupLog)
 {
     String codeSegment;
+    String logMessage;
 
     if (setupLog) {
         codeSegment = "setup";
@@ -13,8 +15,11 @@ void debugOutput(String text, int logLevel, bool setupLog)
         codeSegment = "loop";
     }
 
+    logMessage = "[" + codeSegment + "] [" + LOG_LEVEL_NAMES[logLevel] + "] " + text;
+
     if (MIN_LOG_LEVEL >= logLevel && Serial) {
-        Serial.println("[" + codeSegment + "] [" + LOG_LEVEL_NAMES[logLevel] + "] " + text);
+        Serial.println(logMessage);
+        myLogWebSocket.textAll(logMessage);
     }
 }
 
