@@ -147,14 +147,9 @@ void setup()
     // WebSocket event for message logging
     myLogWebSocket.onEvent(onWsEvent);
     myWebServer.addHandler(&myLogWebSocket);
-
-    //    otaDefineOTAWebServer(&otaServer);
+    // otaDefineOTAWebServer(&otaServer);
     otaDefineOTAWebSite();
     myWebServer.begin();
-
-    // set timeout and start time for OTA update time limit
-    timeout = WIFI_AP_TIMEOUT; // time limit for WiFi AP shutdown in seconds
-    startTime = millis();
 
     // Identify battery monitor type
     timeout = BMTYPE_READ_TIMEOUT; // time limit for getting battery monitor type in seconds
@@ -215,13 +210,17 @@ void setup()
     //    NMEA2000.SetN2kCANSendFrameBufSize(200); // Smaller frame buffer size leads to message drops
     NMEA2000.SetOnOpen(OnN2kOpen);
 
-    delay(10000); // all N2k bus devices start at once; wait for boat bus to be fully initialized before joining
+//    delay(5000); // all N2k bus devices start at once; wait for boat bus to be fully initialized before joining
     debugOutput("N2k node address = " + String(NodeAddress), 4, true);
     if (NMEA2000.Open()) {
         debugOutput("Opened N2k stream.", 4, true);
     } else {
         debugOutput("Error opening N2k stream.", 2, true);
     };
+
+    // set timeout and start time for OTA update time limit
+    timeout = WIFI_AP_TIMEOUT; // time limit for WiFi AP shutdown in seconds
+    startTime = millis();
 }
 
 //-------------------------------------------------------------------------------------
@@ -234,11 +233,9 @@ void loop()
     // Check for OTA web access
     if (OtaWifiAPUP) {
         loopTime = (millis() - startTime) / 1000;
-        if (loopTime < timeout) {
-            otaServer.handleClient();
-        } else {
-            // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
-            otaServer.stop();
+        if (loopTime > timeout && WiFi.softAPgetStationNum() == 0) {
+            // stop OTA Wifi access point 5 minutes after system start, if no client is connected anymore; we don't want to run the AP forever
+            myWebServer.end();
             if (WiFi.mode(WIFI_OFF)) {
                 debugOutput("\nShutdown OTA WiFi access point. No firmware update occured.", 4);
                 OtaWifiAPUP = false;

@@ -6,7 +6,8 @@
 AsyncWebServer myWebServer(WEBSERVER_PORT);
 AsyncWebSocket myLogWebSocket("/log");
 
-int otaStartWifi() // Setup WiFi access point with SSID and password
+// Setup WiFi access point with SSID and password
+int otaStartWifi() 
 {
     int errorCode = 0;
 

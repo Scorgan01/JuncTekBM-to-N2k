@@ -28,7 +28,6 @@ int otaStartWifi();
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len);
 // Define OTA web server with code update function
 void otaDefineOTAWebSite();
-// Define OTA login page
-void otaDefineOTAWebPages(String& pg_login, String& pg_update);
+void otaDefineOTAWebPages(String& pg_login, String& pg_update); // Define OTA login page
 
 #endif
