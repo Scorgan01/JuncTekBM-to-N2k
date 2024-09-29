@@ -22,7 +22,7 @@
    OTA web page design was inspired by: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/ */
 
 #define DEBUG // Flag to activate logging to serial console
-#define TEST // uncomment to provide test data sentences if no battery monitor device is connected
+// #define TEST // uncomment to provide test data sentences if no battery monitor device is connected
 
 // M5 Atom Lite GPIO settings
 #define ESP32_CAN_TX_PIN GPIO_NUM_22 // set CAN TX port to 22
@@ -114,7 +114,7 @@ bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
 void setup()
 {
     uint8_t chipid[6];
-    uint32_t id = 0;
+    uint16_t id = 0;
     int i = 0;
 
 #ifdef DEBUG
@@ -189,7 +189,7 @@ void setup()
         100, // Manufacturer's product code
         "BM Monitor", // Manufacturer's Model ID
         "1.0.0.0", // Manufacturer's Software version code
-        "1.0.0.0", // Manufacturer's Model version
+        "1.0.0", // Manufacturer's Model version
         N2K_LOAD_LEVEL, // Device power load on N2k bus
         0xffff, // N2k version - unset
         0xff // certification level - unset
@@ -198,7 +198,7 @@ void setup()
         id, // Unique number. Use e.g. Serial number.
         170, // Device function=Battery:reports battery status. See codes on http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
         35, // Device class=Electrical generation. See codes on  http://www.nmea.org/Assets/20120726%20nmea%202000%20class%20&%20function%20codes%20v%202.00.pdf
-        2047 // Just choosen free from code list on https://actisense.com/nmea-zertifizierte-produktanbieter or http://www.nmea.org/Assets/20121020%20nmea%202000%20registration%20list.pdf
+        2045 // Just choosen free from code list on https://actisense.com/nmea-zertifizierte-produktanbieter or http://www.nmea.org/Assets/20121020%20nmea%202000%20registration%20list.pdf
     );
 
     // Uncomment 3 rows below to see, what device will send to bus
@@ -216,7 +216,7 @@ void setup()
     //    NMEA2000.SetN2kCANSendFrameBufSize(200); // Smaller frame buffer size leads to message drops
     NMEA2000.SetOnOpen(OnN2kOpen);
 
-    delay(5000); // all N2k bus devices start at once; wait for boat bus to be fully initialized before joining
+    delay(10000); // all N2k bus devices start at once; wait for boat bus to be fully initialized before joining
     debugOutput("N2k node address = " + String(NodeAddress), 4, true);
     if (NMEA2000.Open()) {
         debugOutput("Opened N2k stream.", 4, true);
@@ -230,8 +230,6 @@ void setup()
 //-------------------------------------------------------------------------------------
 void loop()
 {
-    int SourceAddress;
-
     debugOutput("_____________ Next loop _____________\n", 6);
 
     /*
@@ -262,14 +260,7 @@ void loop()
     }
 
     NMEA2000.ParseMessages();
-    SourceAddress = NMEA2000.GetN2kSource();
-    if (SourceAddress != NodeAddress) { // Save potentially changed Source Address to NVS memory
-        NodeAddress = SourceAddress; // Set new Node Address (to save only once)
-        preferences.begin("nvs", false);
-        preferences.putInt("LastNodeAddress", SourceAddress);
-        preferences.end();
-        debugOutput("Address change. New address = " + String(SourceAddress), 4);
-    }
+    CheckN2kSourceAddressChange();
 
     // web socket processing
     myLogWebSocket.cleanupClients();
@@ -629,4 +620,17 @@ void OnN2kOpen()
 {
     // Start schedulers now.
     DCBatStatusScheduler.UpdateNextTime();
+}
+
+void CheckN2kSourceAddressChange()
+{
+    int SourceAddress = NMEA2000.GetN2kSource();
+
+    if (SourceAddress != NodeAddress) { // Save potentially changed Source Address to NVS memory
+        NodeAddress = SourceAddress; // Set new Node Address (to save only once)
+        preferences.begin("nvs", false);
+        preferences.putInt("LastNodeAddress", SourceAddress);
+        preferences.end();
+        debugOutput("Address change. New address = " + String(SourceAddress), 4);
+    }
 }
