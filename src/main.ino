@@ -156,7 +156,6 @@ void setup()
     timeout = WIFI_AP_TIMEOUT; // time limit for WiFi AP shutdown in seconds
     startTime = millis();
 
-
     // Identify battery monitor type
     timeout = BMTYPE_READ_TIMEOUT; // time limit for getting battery monitor type in seconds
     startTime = millis();
@@ -232,24 +231,23 @@ void loop()
 {
     debugOutput("_____________ Next loop _____________\n", 6);
 
-    /*
-        // Check for OTA web access
-        if (OtaWifiAPUP) {
-            loopTime = (millis() - startTime) / 1000;
-            if (loopTime < timeout) {
-                otaServer.handleClient();
+    // Check for OTA web access
+    if (OtaWifiAPUP) {
+        loopTime = (millis() - startTime) / 1000;
+        if (loopTime < timeout) {
+            otaServer.handleClient();
+        } else {
+            // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
+            otaServer.stop();
+            if (WiFi.mode(WIFI_OFF)) {
+                debugOutput("\nShutdown OTA WiFi access point. No firmware update occured.", 4);
+                OtaWifiAPUP = false;
             } else {
-                // stop OTA Wifi access point 5 minutes after system start; we don't want to run the AP forever
-                otaServer.stop();
-                if (WiFi.mode(WIFI_OFF)) {
-                    debugOutput("\nShutdown OTA WiFi access point. No firmware update occured.", 4);
-                    OtaWifiAPUP = false;
-                } else {
-                    debugOutput("Shutdown OTA WiFi access point failed.", 3);
-                }
-            };
-        }
-    */
+                debugOutput("Shutdown OTA WiFi access point failed.", 3);
+            }
+        };
+    }
+
     if (DCBatStatusScheduler.IsTime()) {
         if (BMGetBatteryState(BM_ADDRESS)) {
             SendN2kBatteryState();
