@@ -4,12 +4,12 @@
 #include "debugoutput.h"
 #include "otaupdate.h"
 
-void debugOutput(String text, int logLevel, bool setupLog)
+void debugOutput(String text, int logLevel, bool setupCode)
 {
     String codeSegment;
     String logMessage;
 
-    if (setupLog) {
+    if (setupCode) {
         codeSegment = "setup";
     } else {
         codeSegment = "loop";

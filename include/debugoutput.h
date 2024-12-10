@@ -11,7 +11,7 @@ const int MIN_LOG_LEVEL = 4; // specify minimum log level
 const String LOG_LEVEL_NAMES[] = { "OFF", "FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "ALL" };
 extern HardwareSerial Serial;
 
-void debugOutput(String text, int logLevel, bool setupLog);
+void debugOutput(String text, int logLevel, bool setupCode);
 void debugOutput(String text, int logLevel);
 void debugOutput(String text);
 

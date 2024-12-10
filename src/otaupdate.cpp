@@ -7,20 +7,20 @@ AsyncWebServer myWebServer(WEBSERVER_PORT);
 AsyncWebSocket myLogWebSocket("/log");
 
 // Setup WiFi access point with SSID and password
-int otaStartWifi() 
+int otaStartWifi()
 {
     int errorCode = 0;
 
-    debugOutput("Setting WiFi access point ...", 6, true);
+    debugOutput("Setting WiFi access point ...", 6, setupCode);
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(AP_IPADDRESS, AP_GATEWAY, AP_SUBNET);
     if (!WiFi.softAP(SECRET_WIFI_SSID, SECRET_WIFI_PASSWORD)) {
         errorCode = 1; // error access point setup
     }
 
-    debugOutput("Access point: " + String(SECRET_WIFI_SSID), 4, true);
+    debugOutput("Access point: " + String(SECRET_WIFI_SSID), 4, setupCode);
     IPAddress IP = WiFi.softAPIP();
-    debugOutput("AP IP address: " + IP.toString(), 4, true);
+    debugOutput("AP IP address: " + IP.toString(), 4, setupCode);
 
     if (!MDNS.begin(WIFI_HOST)) { // use mdns for host name resolution
         errorCode = 2; // error mDNS responder setup
@@ -29,17 +29,16 @@ int otaStartWifi()
     return errorCode; // 0 = success; 1 = access point not established; 2 = mDNS responder not established
 }
 
-
 // Web socket event handler
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
-    if(type == WS_EVT_CONNECT) {
-        debugOutput("Web client connected.", 6);
+void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len)
+{
+    if (type == WS_EVT_CONNECT) {
+        debugOutput("Web client connected.", 6, setupCode);
         client->text("Welcome to batteryESP32 Web log!");
-    } else if(type == WS_EVT_DISCONNECT) {
-        debugOutput("Web client disconnected.", 6);
+    } else if (type == WS_EVT_DISCONNECT) {
+        debugOutput("Web client disconnected.", 6, setupCode);
     }
 }
-
 
 void otaDefineOTAWebSite() // Define OTA web pages with code update function
 {
@@ -62,27 +61,27 @@ void otaDefineOTAWebSite() // Define OTA web pages with code update function
     request->send(response);
     ESP.restart(); }, [](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
     if (!index){
-      debugOutput("Update start: " + filename, 4);
+      debugOutput("Update start: " + filename, 4, setupCode);
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-        debugOutput("Update error.", 4);
+        debugOutput("Update error.", 4, setupCode);
         Update.printError(Serial);
       }
     }
     if (Update.write(data, len) != len) {
-      debugOutput("Update error.", 4);
+      debugOutput("Update error.", 4, setupCode);
       Update.printError(Serial);
     }
     if (final) {
       if (Update.end(true)) {
-        debugOutput("Update success: " + String(index+len), 4);
+        debugOutput("Update success: " + String(index+len), 4, setupCode);
       } else {
-        debugOutput("Update error.", 4);
+        debugOutput("Update error.", 4, setupCode);
         Update.printError(Serial);
       }
     } });
 
-    myWebServer.on("/log", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send(200, "text/html", 
+    myWebServer.on("/log", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/html",
             "<!DOCTYPE html>"
             "<html>"
             "<head>"
@@ -99,8 +98,7 @@ void otaDefineOTAWebSite() // Define OTA web pages with code update function
             "<h1>ESP32 Log</h1>"
             "<div id='log' style='height:1200px;font-size:10px;overflow:auto;border:1px solid #ccc;'></div>"
             "</body>"
-            "</html>"
-        );
+            "</html>");
     });
 }
 

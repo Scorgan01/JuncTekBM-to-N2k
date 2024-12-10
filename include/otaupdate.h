@@ -22,6 +22,7 @@ static const char* WIFI_HOST = "batteryesp32"; // hostname "batteryesp32.local"
 static const int WEBSERVER_PORT = 80;
 extern AsyncWebServer myWebServer;
 extern AsyncWebSocket myLogWebSocket;
+extern bool setupCode;
 
 // Setup WiFi access point with SSID and password
 int otaStartWifi();
