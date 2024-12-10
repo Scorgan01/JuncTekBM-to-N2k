@@ -21,6 +21,7 @@ Required libraries are
 - ttlappalainen/NMEA2000-library@ v4.21.3
 - ttlappalainen/NMEA2000_esp32@ v1.0.3
 -	khoih-prog/ESP_WiFiManager_Lite@ v1.10.5
+-	me-no-dev/ESP Async WebServer@ v1.2.4
 
 The code has been implemented with the platformIO IDE. You can find the full set of project parameters at the <platformio.ini> file.
 
