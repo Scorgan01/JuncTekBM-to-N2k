@@ -30,7 +30,9 @@ Initially, I used the "Tail485" interface for the M5Stack Atom lite. Unfortunate
 One "Tail485" interface required a terminator resistor between the A and B data lines to read the data of two JuncTek battery monitor devices correctly. So, you can try to put a small 1/10 watt resistor of 120 Ohm in parallel to the two wires, if you experience weird data reading. Anything between 100-150 Ohms should work.
 My current setup with a "RS485-to-TTL" interface is working without any terminator resistor.<br>
 
-You need to adjust the code, if you want to attach a display, which comes with the KH-F version, to the battery monitor in parallel to the ESP N2K interface. The JuncTek display generates its own status query messages on the RS485 bus, which the code doesn't check in the current version. I don't see any need for a separate cable-connected display, since you have the option to display the data with a bluetooth-connected smartphone, and, of course, with any device that can display N2k battery messages. 
+You need to adjust the code, if you want to attach a display, which comes with the KH-F version, to the battery monitor in parallel to the ESP N2K interface. The JuncTek display generates its own status query messages on the RS485 bus, which the code doesn't check in the current version. I don't see any need for a separate cable-connected display, since you have the option to display the data with a bluetooth-connected smartphone, and, of course, with any device that can display N2k battery messages.
+
+The code checks the availability of a battery monitor of the KL-F or KH-F family. The Atom will restart after 30 seconds, if no such device is detected. I am not sure, whether the JuncTek KG or KM family has a similar RS485 data communication structure. You will probably need to adjust the code, if you want to use these device types.
 
 <b>OTA firmware update</b><br>
 You can update the device with a new firmware via WiFi.
