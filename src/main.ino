@@ -13,7 +13,7 @@
 /* Reads JuncTek KH-F and KL-F series battery monitor data from its RS485 interface and converts it to NMEA2000.
    Creates N2k messages: 127508 - battery status, 127506 - DC detailed status, (126996 - product info)
    Designed for M5Stack Atom Lite ESP32 processor + RS485-to-TTL and CAN modules.
-   Version 1.0, 22/06/2024, Scorgan - Ulrich Meine
+   Code by: Scorgan - Ulrich Meine
 
    Uses the great work of Timo Lappalainen and his NMEA 2000 libraries: https://github.com/ttlappalainen
    All N2k handling uses code by AK-Homberger: https://github.com/AK-Homberger
@@ -105,8 +105,6 @@ tN2kSyncScheduler DCBatStatusScheduler(false, 1500, 500); // scheduler for sendi
 
 unsigned long startTime, loopTime, timeout; // timer variables for timeout of BM type retrieval and OTA WiFi AP
 
-// Set webserver object and Port for the OTA webserver
-// AsyncWebServer otaServer(WEBSERVER_PORT);
 bool OtaWifiAPUP; // Indicator for running OTA WiFi access point
 
 //-------------------------------------------------------------------------------------
