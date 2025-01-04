@@ -26,9 +26,11 @@ Required libraries are
 The code has been implemented with the platformIO IDE. You can find the full set of project parameters at the <platformio.ini> file.
 
 <b>Important hint:</b><br>
-The RS485 connection of my two JuncTek battery monitor devices with the "Tail485" interface for M5Stack Atom required a terminator resistor between the A and B data lines.
-So, I put a small 1/10 watt resistor of 120 Ohm in parallel to the two wires. Anything between 100-150 Ohms should work.
-Without that resistor, the M5Stack Atom was not able to read clear data from the battery monitors.
+Initially, I used the "Tail485" interface for the M5Stack Atom lite. Unfortunately, I recognized some loose contact between the Atom module and two different interfaces. The cable connection to a "RS485-to-TTL" device was much more reliable.<br>
+One "Tail485" interface required a terminator resistor between the A and B data lines to read the data of two JuncTek battery monitor devices correctly. So, you can try to put a small 1/10 watt resistor of 120 Ohm in parallel to the two wires, if you experience weird data reading. Anything between 100-150 Ohms should work.
+My current setup with a "RS485-to-TTL" interface is working without any terminator resistor.<br>
+
+You need to adjust the code, if you want to attach a display, which comes with the KH-F version, to the battery monitor in parallel to the ESP N2K interface. The JuncTek display generates its own status query messages on the RS485 bus, which the code doesn't check in the current version. I don't see any need for a separate cable-connected display, since you have the option to display the data with a bluetooth-connected smartphone, and, of course, with any device that can display N2k battery messages. 
 
 <b>OTA firmware update</b><br>
 You can update the device with a new firmware via WiFi.
@@ -46,6 +48,6 @@ Be careful: There is no validation of the firmware file. You need to know what y
 Kudos:<br>
 The implementation bases on the great work of other projects, first and foremost on the NMEA2000 libraries of Timo Lappalainen: https://github.com/ttlappalainen<br>
 All N2k handling uses code by AK-Homberger: https://github.com/AK-Homberger<br>
-Battery monitor message reading and parsing takes ideas from PlJakobs https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main<br>
+Battery monitor message reading and parsing takes ideas from PlJakobs: https://github.com/pljakobs/JuncTek_Batterymonitor/tree/main<br>
 OTA web update leverages the example from ArduinoOTA Library and work from Rui Santos for adjustments to work with WiFi AP: http://randomnerdtutorials.com<br>
 OTA web page design was inspired by: https://lastminuteengineers.com/esp32-ota-web-updater-arduino-ide/
